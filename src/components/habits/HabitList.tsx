@@ -6,30 +6,45 @@ import { supabase } from '@/lib/supabase/client';
 
 interface HabitListProps {
   onEdit: (habit: Habit) => void;
+  refreshKey: number; // NEW: Prop to trigger refresh
 }
 
-export default function HabitList({ onEdit }: HabitListProps) {
+export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch habits on component mount
+  // --- MODIFIED: useEffect dependency array ---
+  // Now depends on refreshKey. When refreshKey changes, fetchHabits runs again.
   useEffect(() => {
     fetchHabits();
-  }, []);
+  }, [refreshKey]); // Re-run effect when refreshKey changes
 
+  // Function to fetch habits from Supabase
   const fetchHabits = async () => {
     try {
       setLoading(true);
-      setError(null);
-      
-      const { data, error } = await supabase
+      setError(null); // Clear previous errors on new fetch
+
+      // Get current user ID safely
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+         // Don't throw error, just set habits to empty if not logged in
+         // Or handle appropriately based on where HabitList might be used
+         console.warn("HabitList: No user logged in.");
+         setHabits([]);
+         return;
+      }
+
+      // Fetch habits for the current user
+      const { data, error: fetchError } = await supabase
         .from('habits')
         .select('*')
+        .eq('user_id', user.id) // Ensure we only get habits for the logged-in user
         .order('created_at', { ascending: false });
-        
-      if (error) throw error;
-      
+
+      if (fetchError) throw fetchError;
+
       setHabits(data as Habit[]);
     } catch (err: any) {
       setError(err.message || 'Failed to load habits');
@@ -38,65 +53,72 @@ export default function HabitList({ onEdit }: HabitListProps) {
       setLoading(false);
     }
   };
-  
+
+  // Function to delete a habit
   const deleteHabit = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this habit?')) return;
-    
+    // Use a more visually distinct confirmation dialog if possible
+    if (!confirm('Are you sure you want to delete this habit? This action cannot be undone.')) return;
+
     try {
-      setError(null);
-      
-      const { error } = await supabase
+      setError(null); // Clear previous errors
+
+      const { error: deleteError } = await supabase
         .from('habits')
         .delete()
-        .eq('id', id);
-        
-      if (error) throw error;
-      
-      // Refresh habits list
+        .eq('id', id); // Ensure ID match for deletion
+
+      if (deleteError) throw deleteError;
+
+      // Refresh habits list after successful deletion
+      // No need to call fetchHabits() directly if useEffect handles refreshKey,
+      // but for delete, an immediate UI update feels better.
+      // Option 1: Call fetchHabits directly (as before)
+      // fetchHabits();
+      // Option 2: Filter the state locally for faster UI update (optimistic update)
+      setHabits(currentHabits => currentHabits.filter(habit => habit.id !== id));
+      // Note: If using Option 2, ensure parent still triggers refreshKey if needed
+      //       for other potential side effects or absolute data consistency.
+      //       Let's stick with fetchHabits() for simplicity and consistency here.
       fetchHabits();
+
     } catch (err: any) {
       setError(err.message || 'Failed to delete habit');
       console.error('Error deleting habit:', err);
     }
   };
-  
-  const getTimingLabel = (timing: HabitTiming) => {
-    switch (timing) {
-      case HabitTiming.AM:
-        return 'Morning';
-      case HabitTiming.PM:
-        return 'Evening';
-      case HabitTiming.ANYTIME:
-        return 'Anytime';
-      default:
-        return timing;
-    }
-  };
-  
-  const getTimingColor = (timing: HabitTiming) => {
-    switch (timing) {
-      case HabitTiming.AM:
-        return 'bg-yellow-100 text-yellow-800';
-      case HabitTiming.PM:
-        return 'bg-blue-100 text-blue-800';
-      case HabitTiming.ANYTIME:
-        return 'bg-green-100 text-green-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
-  };
 
+  // Helper functions for display (no changes needed)
+  const getTimingLabel = (timing: HabitTiming) => {
+     switch (timing) {
+       case HabitTiming.AM: return 'Morning';
+       case HabitTiming.PM: return 'Evening';
+       case HabitTiming.ANYTIME: return 'Anytime';
+       default: return timing;
+     }
+   };
+  const getTimingColor = (timing: HabitTiming) => {
+     switch (timing) {
+       case HabitTiming.AM: return 'bg-yellow-100 text-yellow-800';
+       case HabitTiming.PM: return 'bg-blue-100 text-blue-800';
+       case HabitTiming.ANYTIME: return 'bg-green-100 text-green-800';
+       default: return 'bg-gray-100 text-gray-800';
+     }
+   };
+
+  // Render loading state
   if (loading) {
-    return <div className="py-4 text-gray-500">Loading habits...</div>;
+    return <div className="py-4 text-center text-gray-500">Loading habits...</div>;
   }
 
+  // Render error state
   if (error) {
     return (
-      <div className="bg-red-50 border-l-4 border-red-500 p-4 my-4">
-        <p className="text-red-700">{error}</p>
+      <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 my-4 rounded-md" role="alert">
+        <p className="font-semibold">Error Loading Habits</p>
+        <p>{error}</p>
         <button
-          onClick={fetchHabits}
-          className="mt-2 text-sm text-red-700 underline"
+          onClick={fetchHabits} // Allow user to retry fetching
+          className="mt-2 text-sm font-medium text-red-600 hover:text-red-800 underline"
         >
           Try again
         </button>
@@ -104,44 +126,57 @@ export default function HabitList({ onEdit }: HabitListProps) {
     );
   }
 
+  // Render empty state
   if (habits.length === 0) {
     return (
-      <div className="text-center py-8 bg-gray-50 rounded-lg">
-        <p className="text-gray-500">You haven't created any habits yet.</p>
-        <p className="text-gray-500">Add your first habit using the form above!</p>
+      <div className="text-center py-10 px-6 bg-gray-50 rounded-lg">
+        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+           <path vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <h3 className="mt-2 text-sm font-semibold text-gray-900">No habits created</h3>
+        <p className="mt-1 text-sm text-gray-500">Get started by adding a new habit using the form above.</p>
       </div>
     );
   }
 
+  // Render the list of habits
   return (
     <div className="mt-6">
       <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Your Habits</h3>
-      <ul className="divide-y divide-gray-200 border-t border-b border-gray-200">
-        {habits.map((habit) => (
-          <li key={habit.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between">
-            <div>
-              <p className="font-medium text-gray-900">{habit.name}</p>
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getTimingColor(habit.timing)}`}>
-                {getTimingLabel(habit.timing)}
-              </span>
-            </div>
-            <div className="mt-2 sm:mt-0 space-x-2">
-              <button
-                onClick={() => onEdit(habit)}
-                className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => deleteHabit(habit.id)}
-                className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-red-700 bg-red-50 hover:bg-red-100"
-              >
-                Delete
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div className="flow-root"> {/* Use flow-root to contain margins */}
+        <ul role="list" className="-my-5 divide-y divide-gray-200 border-t border-b border-gray-200">
+          {habits.map((habit) => (
+            <li key={habit.id} className="py-4">
+              <div className="flex items-center space-x-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">{habit.name}</p>
+                  <p className="text-sm text-gray-500">
+                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getTimingColor(habit.timing)}`}>
+                       {getTimingLabel(habit.timing)}
+                     </span>
+                  </p>
+                </div>
+                <div className="inline-flex items-center space-x-2">
+                   <button
+                    onClick={() => onEdit(habit)}
+                    type="button"
+                    className="inline-flex items-center px-2.5 py-1 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => deleteHabit(habit.id)}
+                    type="button"
+                    className="inline-flex items-center px-2.5 py-1 border border-transparent text-xs font-medium rounded text-red-700 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
