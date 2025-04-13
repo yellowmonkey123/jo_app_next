@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, ChangeEvent } from 'react'; // Import ChangeEvent
 import { StartupFormData } from '@/app/startup/page'; // Adjust path if needed, or define locally
 
 // Define the props the component expects
@@ -21,9 +21,6 @@ export default function FeelingStep({ initialValue, onNext, onBack }: FeelingSte
 
   // Handle clicking the 'Next' button
   const handleNextClick = () => {
-    // Call the onNext prop passed from the parent page,
-    // providing the data for this step (feeling_morning).
-    // We trim the text but allow empty strings if the user doesn't enter anything.
     onNext({ feeling_morning: feelingText.trim() });
   };
 
@@ -32,9 +29,9 @@ export default function FeelingStep({ initialValue, onNext, onBack }: FeelingSte
       {/* Step Title */}
       <h2 className="text-xl font-semibold text-gray-800">How are you feeling?</h2>
 
-      {/* Instructions */}
+      {/* --- FIXED: Replaced ' with &apos; in two places --- */}
       <p className="text-gray-600">
-        Briefly describe how you're feeling this morning. What's on your mind? (Optional)
+        Briefly describe how you&apos;re feeling this morning. What&apos;s on your mind? (Optional)
       </p>
 
       {/* Text Input Area */}
@@ -44,11 +41,11 @@ export default function FeelingStep({ initialValue, onNext, onBack }: FeelingSte
         </label>
         <textarea
           id="feeling-text"
-          rows={4} // Adjust number of rows as needed
+          rows={4}
           className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2"
           placeholder="Write a few words..."
           value={feelingText}
-          onChange={(e) => setFeelingText(e.target.value)}
+          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setFeelingText(e.target.value)} // Added ChangeEvent
         />
       </div>
 
@@ -56,7 +53,7 @@ export default function FeelingStep({ initialValue, onNext, onBack }: FeelingSte
       <div className="flex justify-between pt-6">
         <button
           type="button"
-          onClick={onBack} // Use the onBack prop directly
+          onClick={onBack}
           className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
         >
           Back
@@ -64,7 +61,6 @@ export default function FeelingStep({ initialValue, onNext, onBack }: FeelingSte
         <button
           type="button"
           onClick={handleNextClick}
-          // Next button is always enabled, even if the text area is empty
           className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
         >
           Next
