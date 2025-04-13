@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, ChangeEvent } from 'react'; // Import ChangeEvent
 import { ShutdownFormData } from '@/app/shutdown/page'; // Adjust path if needed
 
 // Define the props the component expects
@@ -30,15 +30,12 @@ export default function AccomplishmentStep({ initialValue, onNext, onBack }: Acc
        setValidationError('Please enter at least one accomplishment.');
        return; // Prevent moving to the next step
     }
-    // Clear any previous validation error
     setValidationError(null);
-    // Call the onNext prop passed from the parent page,
-    // providing the data for this step (accomplishment).
     onNext({ accomplishment: trimmedText });
   };
 
   // Clear validation error when user starts typing
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleTextChange = (e: ChangeEvent<HTMLTextAreaElement>) => { // Use specific event type
       setAccomplishmentText(e.target.value);
       if (validationError) {
           setValidationError(null);
@@ -47,8 +44,8 @@ export default function AccomplishmentStep({ initialValue, onNext, onBack }: Acc
 
   return (
     <div className="space-y-6">
-      {/* Step Title */}
-      <h2 className="text-xl font-semibold text-gray-800">Today's Accomplishment</h2>
+      {/* --- FIXED: Replaced ' with &apos; --- */}
+      <h2 className="text-xl font-semibold text-gray-800">Today&apos;s Accomplishment</h2>
 
       {/* Instructions */}
       <p className="text-gray-600">
@@ -62,15 +59,14 @@ export default function AccomplishmentStep({ initialValue, onNext, onBack }: Acc
         </label>
         <textarea
           id="accomplishment-text"
-          rows={4} // Adjust number of rows as needed
+          rows={4}
           className={`block w-full rounded-md border shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2 ${
-             validationError ? 'border-red-500' : 'border-gray-300' // Highlight if error
+             validationError ? 'border-red-500' : 'border-gray-300'
           }`}
           placeholder="e.g., Finished the project report, went for a walk, cooked a nice meal..."
           value={accomplishmentText}
-          onChange={handleTextChange} // Use custom handler to clear error
+          onChange={handleTextChange}
         />
-         {/* Display validation error */}
          {validationError && (
              <p className="mt-2 text-sm text-red-600">{validationError}</p>
          )}
@@ -80,7 +76,7 @@ export default function AccomplishmentStep({ initialValue, onNext, onBack }: Acc
       <div className="flex justify-between pt-6">
         <button
           type="button"
-          onClick={onBack} // Use the onBack prop directly
+          onClick={onBack}
           className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
         >
           Back
@@ -88,8 +84,6 @@ export default function AccomplishmentStep({ initialValue, onNext, onBack }: Acc
         <button
           type="button"
           onClick={handleNextClick}
-          // Consider if Next should be disabled based on validation,
-          // but clicking it triggers the validation feedback.
           className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
         >
           Next

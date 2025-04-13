@@ -11,7 +11,7 @@ import PrevEveningRatingStep from '@/components/startup/PrevEveningRatingStep';
 import SleepRatingStep from '@/components/startup/SleepRatingStep';
 import MorningRatingStep from '@/components/startup/MorningRatingStep';
 import FeelingStep from '@/components/startup/FeelingStep';
-import AmHabitsStep from '@/components/startup/AmHabitsStep'; // <-- NEW Import
+import AmHabitsStep from '@/components/startup/AmHabitsStep';
 
 
 // Define the structure for the data collected in this form
@@ -37,8 +37,8 @@ export default function StartupPage() {
   const [currentStep, setCurrentStep] = useState<StartupStep>(StartupStep.PREV_EVENING_RATING);
   const [formData, setFormData] = useState<StartupFormData>(initialFormData);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(true); // Handles initial auth check and final submission
-  const [submitError, setSubmitError] = useState<string | null>(null); // State for submission errors
+  const [loading, setLoading] = useState(true);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // --- Authentication Check ---
   useEffect(() => {
@@ -51,28 +51,22 @@ export default function StartupPage() {
       }
       setIsAuthenticated(true);
       setLoading(false);
-      // TODO: Fetch existing log data for today if user revisits and pre-fill form
-      // This would involve fetching from 'daily_logs' and setting formData and potentially currentStep
     };
     checkAuth();
   }, [router]);
 
   // --- Step Navigation ---
   const handleNextStep = (stepData: Partial<StartupFormData>) => {
-    // Update form data, trimming feeling_morning if present
     const updatedData = { ...stepData };
     if (typeof updatedData.feeling_morning === 'string') {
         updatedData.feeling_morning = updatedData.feeling_morning.trim();
     }
-    // Ensure completed_am_habits is always an array
      if (updatedData.completed_am_habits && !Array.isArray(updatedData.completed_am_habits)) {
        console.warn("Received non-array for completed_am_habits, correcting.");
-       updatedData.completed_am_habits = []; // Or handle appropriately
+       updatedData.completed_am_habits = [];
      }
-
     setFormData(prevData => ({ ...prevData, ...updatedData }));
 
-    // Determine next step or submit
     const stepOrder = [
       StartupStep.PREV_EVENING_RATING,
       StartupStep.SLEEP_RATING,
@@ -86,9 +80,7 @@ export default function StartupPage() {
     if (nextStepIndex < stepOrder.length) {
       setCurrentStep(stepOrder[nextStepIndex]);
     } else {
-      // If it was the last step (AM_HABITS), the 'Complete Startup' button
-      // in AmHabitsStep calls this function, triggering the final submit.
-      handleSubmit({ ...formData, ...updatedData }); // Pass the final combined data
+      handleSubmit({ ...formData, ...updatedData });
     }
   };
 
@@ -106,25 +98,22 @@ export default function StartupPage() {
     if (prevStepIndex >= 0) {
       setCurrentStep(stepOrder[prevStepIndex]);
     } else {
-       router.push('/dashboard'); // Go back to dashboard from first step
+       router.push('/dashboard');
     }
   };
 
   // --- Form Submission ---
-  // Modified to accept final data, though handleNextStep prepares it too
   const handleSubmit = async (finalData: StartupFormData) => {
     setLoading(true);
-    setSubmitError(null); // Clear previous submission errors
+    setSubmitError(null);
     console.log('Submitting Startup Data:', finalData);
 
-    // --- TODO: Implement Actual Supabase Upsert Logic ---
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not found for submission.");
 
-      const today = new Date().toISOString().split('T')[0]; // Get YYYY-MM-DD
+      const today = new Date().toISOString().split('T')[0];
 
-      // Prepare data for upsert, ensuring nulls for missing ratings if needed
       const upsertData = {
           user_id: user.id,
           log_date: today,
@@ -133,26 +122,28 @@ export default function StartupPage() {
           morning_rating: finalData.morning_rating,
           feeling_morning: finalData.feeling_morning,
           completed_am_habits: finalData.completed_am_habits,
-          startup_completed_at: new Date().toISOString(), // Set completion timestamp
-          // updated_at will be handled by Supabase trigger or default
+          startup_completed_at: new Date().toISOString(),
       };
 
-      // Upsert into daily_logs table based on user_id and log_date
       const { error } = await supabase
           .from('daily_logs')
-          .upsert(upsertData, { onConflict: 'user_id, log_date' }); // Specify conflict target
+          .upsert(upsertData, { onConflict: 'user_id, log_date' });
 
       if (error) throw error;
 
       console.log('Data submitted successfully to Supabase!');
-      router.push('/dashboard?startup=complete'); // Redirect on success
+      router.push('/dashboard?startup=complete');
 
-    } catch (error: any) {
+    // --- FIXED: Changed 'any' to 'unknown' and added type check ---
+    } catch (error: unknown) {
        console.error("Submission Error:", error);
-       setSubmitError(error.message || "An error occurred while saving your startup routine.");
-       setLoading(false); // Stop loading indicator on error
+       // Set error message, checking if err is an Error instance
+       setSubmitError(error instanceof Error ? error.message : "An error occurred while saving your startup routine.");
+       // setLoading(false) happens in finally block now
+    } finally {
+        // --- NEW: Added finally block to ensure loading stops ---
+        setLoading(false);
     }
-    // setLoading should stop on error or redirect
   };
 
 
@@ -160,111 +151,35 @@ export default function StartupPage() {
   const renderCurrentStep = () => {
     switch (currentStep) {
       case StartupStep.PREV_EVENING_RATING:
-        return (
-          <PrevEveningRatingStep
-            initialValue={formData.prev_evening_rating}
-            onNext={handleNextStep}
-            onBack={handlePrevStep}
-          />
-        );
+        return ( <PrevEveningRatingStep initialValue={formData.prev_evening_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
       case StartupStep.SLEEP_RATING:
-        return (
-          <SleepRatingStep
-            initialValue={formData.sleep_rating}
-            onNext={handleNextStep}
-            onBack={handlePrevStep}
-          />
-        );
+        return ( <SleepRatingStep initialValue={formData.sleep_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
       case StartupStep.MORNING_RATING:
-         return (
-           <MorningRatingStep
-             initialValue={formData.morning_rating}
-             onNext={handleNextStep}
-             onBack={handlePrevStep}
-           />
-         );
+         return ( <MorningRatingStep initialValue={formData.morning_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
        case StartupStep.FEELING:
-         return (
-           <FeelingStep
-             initialValue={formData.feeling_morning}
-             onNext={handleNextStep}
-             onBack={handlePrevStep}
-           />
-         );
+         return ( <FeelingStep initialValue={formData.feeling_morning} onNext={handleNextStep} onBack={handlePrevStep} /> );
        case StartupStep.AM_HABITS:
-         // --- MODIFIED: Use the actual component ---
-         return (
-           <AmHabitsStep
-             initialValue={formData.completed_am_habits} // Pass correct initial value
-             onNext={handleNextStep} // Pass the function to trigger final submit
-             onBack={handlePrevStep} // Pass the function to handle moving back
-           />
-         );
+         return ( <AmHabitsStep initialValue={formData.completed_am_habits} onNext={handleNextStep} onBack={handlePrevStep} /> );
       default:
-        // Should not happen if currentStep state is managed correctly
-        // Maybe render a fallback or error message
         console.error("Invalid startup step:", currentStep);
         return <div>Error: Invalid step encountered.</div>;
     }
   };
 
-  // --- Main Render ---
+  // --- Main Render (JSX remains the same) ---
   if (loading && !isAuthenticated) {
-    // Show loading spinner only during initial auth check
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-      </div>
-    );
+    return ( <div className="min-h-screen flex items-center justify-center"> <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> </div> );
   }
+  if (!isAuthenticated) { return null; }
 
-  if (!isAuthenticated) {
-    return null; // Redirect happens in useEffect
-  }
-
-  // Render the multi-step form container
   return (
     <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
-       <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Morning Startup</h1>
-         {/* TODO: Add a progress indicator (e.g., Step 5 of 5) */}
-         <Link
-           href="/dashboard"
-           className="text-sm text-indigo-600 hover:underline"
-           title="Cancel and return to Dashboard"
-         >
-           Cancel
-         </Link>
-       </div>
-
-       {/* Display submission error if any */}
-       {submitError && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
-             <strong className="font-bold">Save Error: </strong>
-             <span className="block sm:inline">{submitError}</span>
-          </div>
-        )}
-
-       <div className="bg-white shadow-md rounded-lg p-6 min-h-[300px]">
-         {/* Render the component for the current step */}
-         {renderCurrentStep()}
-       </div>
-
-       {/* Global loading overlay for final submission */}
-       {/* Check loading state directly instead of step */}
-       {loading && currentStep === StartupStep.AM_HABITS && ( // Keep condition for clarity or remove step check if loading is only true on submit
-         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
-            <div className="text-center">
-                <svg className="animate-spin h-8 w-8 text-white mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <p className="text-white text-lg">Saving your progress...</p>
-            </div>
-         </div>
+       <div className="flex items-center justify-between mb-6 flex-wrap gap-4"> <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Morning Startup</h1> <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline" title="Cancel and return to Dashboard"> Cancel </Link> </div>
+       {submitError && ( <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"> <strong className="font-bold">Save Error: </strong> <span className="block sm:inline">{submitError}</span> </div> )}
+       <div className="bg-white shadow-md rounded-lg p-6 min-h-[300px]"> {renderCurrentStep()} </div>
+       {/* Corrected loading state check */}
+       {loading && !submitError && ( // Show loading overlay only when processing submission
+         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50"> <div className="text-center"> <svg className="animate-spin h-8 w-8 text-white mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> <p className="text-white text-lg">Saving your progress...</p> </div> </div>
        )}
     </div>
   );
