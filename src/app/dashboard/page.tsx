@@ -3,36 +3,49 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+// Import User type from Supabase if needed for other parts, but not strictly needed for this fix
+// import type { User } from '@supabase/supabase-js';
 import { DailyLog } from '@/types';
 import Link from 'next/link';
 
 export default function Dashboard() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  // Removed unused 'user' state: const [user, setUser] = useState<User | null>(null);
   const [todayLog, setTodayLog] = useState<DailyLog | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession(); // Also capture session error just in case
+      
+      // Handle potential session error
+      if (sessionError || !session) {
+        console.error("Session error or no session:", sessionError);
         router.push('/auth/signin');
         return;
       }
       
-      setUser(session.user);
+      // No longer need to set user state: setUser(session.user);
       
       // Fetch today's log if it exists
       const today = new Date().toISOString().split('T')[0];
-      const { data, error } = await supabase
+      // Prefix unused 'error' with underscore
+      const { data, error: _error } = await supabase
         .from('daily_logs')
         .select('*')
-        .eq('user_id', session.user.id)
+        .eq('user_id', session.user.id) // Use session directly
         .eq('log_date', today)
-        .single();
+        .maybeSingle(); // Use maybeSingle() to gracefully handle no row found
+
+      // Log Supabase query error if it occurs (optional but good practice)
+      if (_error) {
+          console.error("Error fetching today's log:", _error);
+      }
       
       if (data) {
         setTodayLog(data as DailyLog);
+      } else {
+        setTodayLog(null); // Ensure state is null if no data
       }
       
       setLoading(false);
@@ -49,6 +62,7 @@ export default function Dashboard() {
     );
   }
 
+  // Rest of the component remains the same...
   return (
     <div className="max-w-4xl mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6">Welcome to Jo</h1>
