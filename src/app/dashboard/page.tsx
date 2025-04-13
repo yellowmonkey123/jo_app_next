@@ -3,41 +3,33 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-// Import User type from Supabase if needed for other parts, but not strictly needed for this fix
 // import type { User } from '@supabase/supabase-js';
 import { DailyLog } from '@/types';
 import Link from 'next/link';
 
 export default function Dashboard() {
   const router = useRouter();
-  // Removed unused 'user' state: const [user, setUser] = useState<User | null>(null);
   const [todayLog, setTodayLog] = useState<DailyLog | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession(); // Also capture session error just in case
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      // Handle potential session error
       if (sessionError || !session) {
         console.error("Session error or no session:", sessionError);
         router.push('/auth/signin');
         return;
       }
       
-      // No longer need to set user state: setUser(session.user);
-      
-      // Fetch today's log if it exists
       const today = new Date().toISOString().split('T')[0];
-      // Prefix unused 'error' with underscore
       const { data, error: _error } = await supabase
         .from('daily_logs')
         .select('*')
-        .eq('user_id', session.user.id) // Use session directly
+        .eq('user_id', session.user.id)
         .eq('log_date', today)
-        .maybeSingle(); // Use maybeSingle() to gracefully handle no row found
+        .maybeSingle(); 
 
-      // Log Supabase query error if it occurs (optional but good practice)
       if (_error) {
           console.error("Error fetching today's log:", _error);
       }
@@ -45,7 +37,7 @@ export default function Dashboard() {
       if (data) {
         setTodayLog(data as DailyLog);
       } else {
-        setTodayLog(null); // Ensure state is null if no data
+        setTodayLog(null);
       }
       
       setLoading(false);
@@ -62,15 +54,16 @@ export default function Dashboard() {
     );
   }
 
-  // Rest of the component remains the same...
   return (
     <div className="max-w-4xl mx-auto p-4">
       <h1 className="text-3xl font-bold mb-6">Welcome to Jo</h1>
       
       <div className="bg-white shadow rounded-lg p-6 mb-6">
-        <h2 className="text-xl font-semibold mb-4">Today's Progress</h2>
+        {/* --- FIXED: Replaced ' with &apos; --- */}
+        <h2 className="text-xl font-semibold mb-4">Today&apos;s Progress</h2>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Morning Startup section ... */}
           <div className="bg-gray-50 p-4 rounded-lg">
             <h3 className="font-medium mb-2">Morning Startup</h3>
             {todayLog?.startup_completed_at ? (
@@ -90,6 +83,7 @@ export default function Dashboard() {
             )}
           </div>
           
+          {/* Evening Shutdown section ... */}
           <div className="bg-gray-50 p-4 rounded-lg">
             <h3 className="font-medium mb-2">Evening Shutdown</h3>
             {todayLog?.shutdown_completed_at ? (
@@ -115,6 +109,7 @@ export default function Dashboard() {
         </div>
       </div>
       
+      {/* Bottom links section ... */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Link href="/habits" className="bg-white shadow rounded-lg p-6 hover:shadow-md transition">
           <h2 className="text-xl font-semibold mb-2">Manage Habits</h2>

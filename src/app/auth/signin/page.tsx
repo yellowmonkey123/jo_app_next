@@ -18,16 +18,18 @@ export default function SignIn() {
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { error: signInError } = await supabase.auth.signInWithPassword({ // Renamed error variable to avoid conflict
         email,
         password,
       });
 
-      if (error) throw error;
-      
+      if (signInError) throw signInError; // Use renamed variable
+
       router.push('/dashboard');
-    } catch (error: any) {
-      setError(error.message || 'An error occurred during sign in');
+    // --- FIXED: Changed 'any' to 'unknown' and added type assertion ---
+    } catch (error: unknown) {
+      // Assert error as type Error to access message property safely
+      setError((error as Error).message || 'An error occurred during sign in');
     } finally {
       setLoading(false);
     }
@@ -42,13 +44,13 @@ export default function SignIn() {
             Sign in to your account
           </p>
         </div>
-        
+
         {error && (
           <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
             <div className="text-red-700">{error}</div>
           </div>
         )}
-        
+
         <form className="mt-8 space-y-6" onSubmit={handleSignIn}>
           <div className="rounded-md shadow-sm -space-y-px">
             <div>
@@ -90,10 +92,11 @@ export default function SignIn() {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </div>
-          
+
           <div className="text-sm text-center">
+            {/* --- FIXED: Replaced ' with &apos; --- */}
             <Link href="/auth/signup" className="font-medium text-indigo-600 hover:text-indigo-500">
-              Don't have an account? Sign up
+              Don&apos;t have an account? Sign up
             </Link>
           </div>
         </form>
