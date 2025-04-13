@@ -30,12 +30,12 @@ export default function AmHabitsStep({ initialValue, onNext, onBack }: AmHabitsS
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not found");
 
-        // Fetch habits where timing is 'AM' or 'ANYTIME' for the current user
+        // --- MODIFIED LINE: Fetch habits where timing is 'AM' ONLY ---
         const { data, error: fetchError } = await supabase
           .from('habits')
           .select('*')
           .eq('user_id', user.id)
-          .in('timing', [HabitTiming.AM, HabitTiming.ANYTIME]) // Filter by timing
+          .eq('timing', HabitTiming.AM) // <-- Changed from .in() to .eq()
           .order('name', { ascending: true }); // Order alphabetically
 
         if (fetchError) throw fetchError;
@@ -84,9 +84,9 @@ export default function AmHabitsStep({ initialValue, onNext, onBack }: AmHabitsS
       {/* Step Title */}
       <h2 className="text-xl font-semibold text-gray-800">Completed AM Habits</h2>
 
-      {/* Instructions */}
+      {/* --- MODIFIED TEXT: Instructions --- */}
       <p className="text-gray-600">
-        Check off the morning or anytime habits you've completed today.
+        Check off the morning habits you've completed today.
       </p>
 
       {/* Habits List Area */}
@@ -95,7 +95,7 @@ export default function AmHabitsStep({ initialValue, onNext, onBack }: AmHabitsS
         {error && <p className="text-red-600">Error: {error}</p>}
 
         {!loading && !error && availableHabits.length === 0 && (
-          <p className="text-gray-500">No relevant AM or Anytime habits found. You can add habits in the 'Manage Habits' section.</p>
+          <p className="text-gray-500">No morning habits found. You can add habits in the 'Manage Habits' section.</p> // Adjusted fallback text slightly
         )}
 
         {!loading && !error && availableHabits.length > 0 && (

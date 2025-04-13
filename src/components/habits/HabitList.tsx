@@ -6,16 +6,22 @@ import { supabase } from '@/lib/supabase/client';
 
 interface HabitListProps {
   onEdit: (habit: Habit) => void;
-  refreshKey: number; // NEW: Prop to trigger refresh
+  refreshKey: number; // Prop to trigger refresh
 }
+
+// Define the desired sort order for timings
+const timingSortOrder: { [key in HabitTiming]: number } = {
+  [HabitTiming.AM]: 1,
+  [HabitTiming.ANYTIME]: 2,
+  [HabitTiming.PM]: 3,
+};
 
 export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
   const [habits, setHabits] = useState<Habit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- MODIFIED: useEffect dependency array ---
-  // Now depends on refreshKey. When refreshKey changes, fetchHabits runs again.
+  // useEffect dependency array includes refreshKey
   useEffect(() => {
     fetchHabits();
   }, [refreshKey]); // Re-run effect when refreshKey changes
@@ -26,26 +32,41 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
       setLoading(true);
       setError(null); // Clear previous errors on new fetch
 
-      // Get current user ID safely
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-         // Don't throw error, just set habits to empty if not logged in
-         // Or handle appropriately based on where HabitList might be used
-         console.warn("HabitList: No user logged in.");
-         setHabits([]);
-         return;
+        console.warn("HabitList: No user logged in.");
+        setHabits([]);
+        setLoading(false); // Ensure loading stops if no user
+        return;
       }
 
-      // Fetch habits for the current user
+      // Fetch habits for the current user, order by name ascending in DB
+      // This provides the secondary sort order directly from the query
       const { data, error: fetchError } = await supabase
         .from('habits')
         .select('*')
-        .eq('user_id', user.id) // Ensure we only get habits for the logged-in user
-        .order('created_at', { ascending: false });
+        .eq('user_id', user.id)
+        .order('name', { ascending: true }); // <-- MODIFIED: Order by name initially
 
       if (fetchError) throw fetchError;
 
-      setHabits(data as Habit[]);
+      // --- NEW: Custom Sort Logic ---
+      const sortedData = (data as Habit[]).sort((a, b) => {
+        const timingOrderA = timingSortOrder[a.timing] ?? 99; // Assign high number if timing is unknown
+        const timingOrderB = timingSortOrder[b.timing] ?? 99;
+
+        // Compare based on timing first
+        if (timingOrderA !== timingOrderB) {
+          return timingOrderA - timingOrderB; // Sort by AM -> Anytime -> PM
+        }
+
+        // If timings are the same, sort by name (already sorted by DB, but good fallback)
+        return a.name.localeCompare(b.name);
+      });
+      // --- End Custom Sort Logic ---
+
+      setHabits(sortedData); // Set the custom-sorted data
+
     } catch (err: any) {
       setError(err.message || 'Failed to load habits');
       console.error('Error fetching habits:', err);
@@ -54,40 +75,24 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
     }
   };
 
-  // Function to delete a habit
+  // Function to delete a habit (no changes needed here)
   const deleteHabit = async (id: string) => {
-    // Use a more visually distinct confirmation dialog if possible
     if (!confirm('Are you sure you want to delete this habit? This action cannot be undone.')) return;
-
     try {
-      setError(null); // Clear previous errors
-
+      setError(null);
       const { error: deleteError } = await supabase
         .from('habits')
         .delete()
-        .eq('id', id); // Ensure ID match for deletion
-
+        .eq('id', id);
       if (deleteError) throw deleteError;
-
-      // Refresh habits list after successful deletion
-      // No need to call fetchHabits() directly if useEffect handles refreshKey,
-      // but for delete, an immediate UI update feels better.
-      // Option 1: Call fetchHabits directly (as before)
-      // fetchHabits();
-      // Option 2: Filter the state locally for faster UI update (optimistic update)
-      setHabits(currentHabits => currentHabits.filter(habit => habit.id !== id));
-      // Note: If using Option 2, ensure parent still triggers refreshKey if needed
-      //       for other potential side effects or absolute data consistency.
-      //       Let's stick with fetchHabits() for simplicity and consistency here.
-      fetchHabits();
-
+      fetchHabits(); // Re-fetch to update the list correctly sorted
     } catch (err: any) {
       setError(err.message || 'Failed to delete habit');
       console.error('Error deleting habit:', err);
     }
   };
 
-  // Helper functions for display (no changes needed)
+ // Helper functions for display (no changes needed)
   const getTimingLabel = (timing: HabitTiming) => {
      switch (timing) {
        case HabitTiming.AM: return 'Morning';
@@ -104,6 +109,9 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
        default: return 'bg-gray-100 text-gray-800';
      }
    };
+
+
+  // --- Rendering Logic (No changes needed below this line) ---
 
   // Render loading state
   if (loading) {
