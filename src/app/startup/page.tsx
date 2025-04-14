@@ -13,7 +13,6 @@ import MorningRatingStep from '@/components/startup/MorningRatingStep';
 import FeelingStep from '@/components/startup/FeelingStep';
 import AmHabitsStep from '@/components/startup/AmHabitsStep';
 
-
 // Define the structure for the data collected in this form
 export interface StartupFormData {
   prev_evening_rating: Rating | null;
@@ -32,6 +31,31 @@ const initialFormData: StartupFormData = {
   completed_am_habits: [],
 };
 
+// --- ADDED: Helper function to get local date string (YYYY-MM-DD) ---
+// Uses Intl API. Consider using a library like date-fns-tz for more robustness
+function getLocalDateString(timezone: string): string {
+    try {
+        const date = new Date();
+        // Use Intl.DateTimeFormat to get parts in the target timezone
+        const formatter = new Intl.DateTimeFormat('en-CA', { // 'en-CA' reliably gives YYYY-MM-DD format
+            timeZone: timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        });
+        
+        // Format the date and return
+        return formatter.format(date);
+        
+    } catch (e) {
+        console.error(`Failed to format date for timezone ${timezone}:`, e);
+        // Fallback to UTC date if timezone formatting fails
+        return new Date().toISOString().split('T')[0];
+    }
+}
+// --- END ADDED HELPER ---
+
+
 export default function StartupPage() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState<StartupStep>(StartupStep.PREV_EVENING_RATING);
@@ -40,7 +64,7 @@ export default function StartupPage() {
   const [loading, setLoading] = useState(true);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // --- Authentication Check ---
+  // --- Authentication Check (Unchanged) ---
   useEffect(() => {
     const checkAuth = async () => {
       setLoading(true);
@@ -55,8 +79,8 @@ export default function StartupPage() {
     checkAuth();
   }, [router]);
 
-  // --- Step Navigation ---
-  const handleNextStep = (stepData: Partial<StartupFormData>) => {
+  // --- Step Navigation (Unchanged - handleNextStep, handlePrevStep) ---
+   const handleNextStep = (stepData: Partial<StartupFormData>) => {
     const updatedData = { ...stepData };
     if (typeof updatedData.feeling_morning === 'string') {
         updatedData.feeling_morning = updatedData.feeling_morning.trim();
@@ -80,6 +104,7 @@ export default function StartupPage() {
     if (nextStepIndex < stepOrder.length) {
       setCurrentStep(stepOrder[nextStepIndex]);
     } else {
+      // Pass the latest merged data to handleSubmit
       handleSubmit({ ...formData, ...updatedData });
     }
   };
@@ -102,71 +127,94 @@ export default function StartupPage() {
     }
   };
 
-  // --- Form Submission ---
+
+  // --- Form Submission (MODIFIED) ---
   const handleSubmit = async (finalData: StartupFormData) => {
     setLoading(true);
     setSubmitError(null);
     console.log('Submitting Startup Data:', finalData);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // 1. Get User
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
       if (!user) throw new Error("User not found for submission.");
 
-      const today = new Date().toISOString().split('T')[0];
+      // 2. Get User's Timezone from Profile
+      let userTimezone = 'UTC'; // Default timezone
+      const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('timezone')
+          .eq('id', user.id)
+          .single();
 
+      if (profileError && profileError.code !== 'PGRST116') { // Ignore error if profile not found, use default
+          console.error("Error fetching profile timezone:", profileError);
+          // Optional: throw error or allow proceeding with UTC default
+      } else if (profileData?.timezone) {
+          userTimezone = profileData.timezone;
+      }
+      console.log(`Using timezone: ${userTimezone}`);
+
+      // 3. Calculate Local Date based on User's Timezone
+      const localDate = getLocalDateString(userTimezone); // Use helper function
+      console.log(`Calculated local date: ${localDate}`);
+
+
+      // 4. Prepare Upsert Data with LOCAL date
       const upsertData = {
           user_id: user.id,
-          log_date: today,
+          log_date: localDate, // <-- Use calculated local date
           prev_evening_rating: finalData.prev_evening_rating,
           sleep_rating: finalData.sleep_rating,
           morning_rating: finalData.morning_rating,
           feeling_morning: finalData.feeling_morning,
           completed_am_habits: finalData.completed_am_habits,
-          startup_completed_at: new Date().toISOString(),
+          startup_completed_at: new Date().toISOString(), // Completion timestamp is still UTC
+          // Ensure other fields are not accidentally overwritten if they exist
+          // Supabase upsert handles merging based on conflict target
       };
 
-      const { error } = await supabase
+      // 5. Perform Upsert
+      console.log('Upserting data:', upsertData);
+      const { error: upsertError } = await supabase
           .from('daily_logs')
-          .upsert(upsertData, { onConflict: 'user_id, log_date' });
+          .upsert(upsertData, { onConflict: 'user_id, log_date' }); // Ensure conflict target is correct
 
-      if (error) throw error;
+      if (upsertError) throw upsertError;
 
       console.log('Data submitted successfully to Supabase!');
       router.push('/dashboard?startup=complete');
 
-    // --- FIXED: Changed 'any' to 'unknown' and added type check ---
     } catch (error: unknown) {
        console.error("Submission Error:", error);
-       // Set error message, checking if err is an Error instance
        setSubmitError(error instanceof Error ? error.message : "An error occurred while saving your startup routine.");
-       // setLoading(false) happens in finally block now
     } finally {
-        // --- NEW: Added finally block to ensure loading stops ---
         setLoading(false);
     }
   };
 
 
-  // --- Render Logic ---
+  // --- Render Logic (Unchanged - renderCurrentStep, main render) ---
   const renderCurrentStep = () => {
-    switch (currentStep) {
-      case StartupStep.PREV_EVENING_RATING:
-        return ( <PrevEveningRatingStep initialValue={formData.prev_evening_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
-      case StartupStep.SLEEP_RATING:
-        return ( <SleepRatingStep initialValue={formData.sleep_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
-      case StartupStep.MORNING_RATING:
-         return ( <MorningRatingStep initialValue={formData.morning_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
-       case StartupStep.FEELING:
-         return ( <FeelingStep initialValue={formData.feeling_morning} onNext={handleNextStep} onBack={handlePrevStep} /> );
-       case StartupStep.AM_HABITS:
-         return ( <AmHabitsStep initialValue={formData.completed_am_habits} onNext={handleNextStep} onBack={handlePrevStep} /> );
-      default:
-        console.error("Invalid startup step:", currentStep);
-        return <div>Error: Invalid step encountered.</div>;
-    }
-  };
+     switch (currentStep) {
+       case StartupStep.PREV_EVENING_RATING:
+         return ( <PrevEveningRatingStep initialValue={formData.prev_evening_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
+       case StartupStep.SLEEP_RATING:
+         return ( <SleepRatingStep initialValue={formData.sleep_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
+       case StartupStep.MORNING_RATING:
+          return ( <MorningRatingStep initialValue={formData.morning_rating} onNext={handleNextStep} onBack={handlePrevStep} /> );
+        case StartupStep.FEELING:
+          return ( <FeelingStep initialValue={formData.feeling_morning} onNext={handleNextStep} onBack={handlePrevStep} /> );
+        case StartupStep.AM_HABITS:
+          // Pass finalData.completed_am_habits if needed, or rely on formData state
+          return ( <AmHabitsStep initialValue={formData.completed_am_habits} onNext={handleNextStep} onBack={handlePrevStep} /> );
+       default:
+         console.error("Invalid startup step:", currentStep);
+         return <div>Error: Invalid step encountered.</div>;
+     }
+   };
 
-  // --- Main Render (JSX remains the same) ---
   if (loading && !isAuthenticated) {
     return ( <div className="min-h-screen flex items-center justify-center"> <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> </div> );
   }
@@ -177,7 +225,6 @@ export default function StartupPage() {
        <div className="flex items-center justify-between mb-6 flex-wrap gap-4"> <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Morning Startup</h1> <Link href="/dashboard" className="text-sm text-indigo-600 hover:underline" title="Cancel and return to Dashboard"> Cancel </Link> </div>
        {submitError && ( <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"> <strong className="font-bold">Save Error: </strong> <span className="block sm:inline">{submitError}</span> </div> )}
        <div className="bg-white shadow-md rounded-lg p-6 min-h-[300px]"> {renderCurrentStep()} </div>
-       {/* Corrected loading state check */}
        {loading && !submitError && ( // Show loading overlay only when processing submission
          <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50"> <div className="text-center"> <svg className="animate-spin h-8 w-8 text-white mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"> <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle> <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path> </svg> <p className="text-white text-lg">Saving your progress...</p> </div> </div>
        )}

@@ -6,15 +6,32 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
-// Define the Profile type based on your schema and src/types/index.ts
+// Define the Profile type based on your schema including the new timezone field
 type Profile = {
     id: string; // UUID, matches auth.users.id
     updated_at: string | null;
     display_name: string | null;
     phone: string | null;
     avatar_url: string | null;
-    enable_sms_notifications: boolean; // Added for consent
+    enable_sms_notifications: boolean;
+    timezone: string | null; // <-- ADDED timezone field
 };
+
+// --- ADDED: Sample list of IANA Timezones ---
+// (You can expand this list or use a library for a more comprehensive one)
+const timezones = [
+    'UTC',
+    'America/New_York',
+    'America/Chicago',
+    'America/Denver',
+    'America/Los_Angeles',
+    'Europe/London',
+    'Europe/Berlin',
+    'Asia/Tokyo',
+    'Australia/Sydney',
+];
+// --- END ADDED ---
+
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -22,12 +39,13 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [smsEnabled, setSmsEnabled] = useState<boolean>(false);
+  const [timezone, setTimezone] = useState<string>('UTC'); // <-- ADDED state for timezone, default 'UTC'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // --- Fetch user and profile data ---
+  // --- Fetch user and profile data (MODIFIED) ---
   const fetchData = useCallback(async () => {
     console.log("SettingsPage: Starting fetchData...");
     setLoading(true);
@@ -36,6 +54,7 @@ export default function SettingsPage() {
     setProfile(null);
     setPhoneNumber('');
     setSmsEnabled(false);
+    setTimezone('UTC'); // Reset timezone state on fetch
 
     try {
       // 1. Fetch Auth User
@@ -50,47 +69,49 @@ export default function SettingsPage() {
       setUser(currentUser);
 
 
-      // 2. Fetch Profile using the user ID
+      // 2. Fetch Profile using the user ID (includes timezone)
       console.log("SettingsPage: Fetching profile for user:", currentUser.id);
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('*') // '*' includes the new timezone column
         .eq('id', currentUser.id)
-        .single(); // Using single() assuming profile must exist or it's an error state
+        .single();
 
       if (profileError) {
           if (profileError.code === 'PGRST116') {
                console.warn("SettingsPage: Profile row not found for this user.", profileError);
                setError("Profile data not found. Please contact support or ensure your profile exists.");
           } else {
-               throw profileError; // Throw other errors
+               throw profileError;
           }
       } else if (profileData) {
           console.log("SettingsPage: Profile fetched:", profileData);
-          setProfile(profileData);
+          setProfile(profileData as Profile); // Cast to include timezone
           setPhoneNumber(profileData.phone || '');
           setSmsEnabled(profileData.enable_sms_notifications || false);
+          setTimezone(profileData.timezone || 'UTC'); // <-- ADDED: Set timezone state from profile or default
       }
 
-    // --- FIXED: Changed 'any' to 'unknown' and added type check ---
     } catch (err: unknown) {
       console.error('SettingsPage: Error fetching data:', err);
       let errorMessage = "Failed to load user or profile data. Please try refreshing.";
-      if (err instanceof Error) {
-          // Use specific messages based on known error patterns if possible
-          if (err.message.includes("relation \"public.profiles\" does not exist")) {
+       if (err instanceof Error) {
+           if (err.message.includes("column profiles.timezone does not exist")) {
+               errorMessage = "Database error: 'timezone' column not found in 'profiles' table. Please run the database migration.";
+           } else if (err.message.includes("relation \"public.profiles\" does not exist")) {
               errorMessage = "Database error: Profiles table not found.";
-          } else if (err.message.includes("permission denied")) {
+           } else if (err.message.includes("permission denied")) {
               errorMessage = "Permission denied. Please check database permissions (RLS policies and Grants).";
-          } else {
-              errorMessage = err.message; // Use the actual error message
-          }
-      }
+           } else {
+              errorMessage = err.message;
+           }
+       }
       setError(errorMessage);
       setUser(null);
       setProfile(null);
       setPhoneNumber('');
       setSmsEnabled(false);
+      setTimezone('UTC'); // Reset timezone on error
     } finally {
       setLoading(false);
       console.log("SettingsPage: fetchData finished.");
@@ -103,23 +124,21 @@ export default function SettingsPage() {
 
   // --- Action Handlers ---
   const handlePasswordReset = async () => {
-    if (!user?.email) { setError("Could not find user's email address."); return; }
+     if (!user?.email) { setError("Could not find user's email address."); return; }
     setIsProcessing(true); setError(null); setMessage(null);
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(user.email, {});
       if (resetError) throw resetError;
       setMessage('Password reset email sent. Please check your inbox.');
-    // --- FIXED: Changed 'any' to 'unknown' and added type check ---
     } catch (err: unknown) {
       console.error("Password Reset Error:", err);
-      // Set error message, checking if err is an Error instance
       setError(err instanceof Error ? err.message : 'Failed to send password reset email.');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // --- UPDATED: Profile Update Handler ---
+  // --- UPDATED: Profile Update Handler (MODIFIED) ---
   const handleUpdateProfile = async (e: FormEvent) => {
       e.preventDefault();
       if (!user || !profile) {
@@ -128,12 +147,13 @@ export default function SettingsPage() {
       }
 
       setIsProcessing(true); setError(null); setMessage(null);
-      console.log("SettingsPage: Attempting to update profile for user:", user.id, "with phone:", phoneNumber, "SMS enabled:", smsEnabled);
+      console.log("SettingsPage: Attempting to update profile for user:", user.id, "with phone:", phoneNumber, "SMS enabled:", smsEnabled, "Timezone:", timezone); // <-- ADDED timezone log
 
       const updates = {
-          id: user.id,
+          id: user.id, // Not strictly needed for update, but good practice
           phone: phoneNumber.trim() === '' ? null : phoneNumber.trim(),
           enable_sms_notifications: smsEnabled,
+          timezone: timezone, // <-- ADDED: timezone from state
           updated_at: new Date().toISOString(),
       };
 
@@ -144,21 +164,20 @@ export default function SettingsPage() {
               .eq('id', user.id);
 
           if (updateError) {
-              if (updateError.message.includes("violates row-level security policy")) {
-                  console.error("RLS Error during profile update:", updateError);
-                  setError("Update failed: Permission denied. Please check RLS policies for updates.");
-              } else {
-                  throw updateError; // Throw other update errors
-              }
+               if (updateError.message.includes("violates row-level security policy")) {
+                   console.error("RLS Error during profile update:", updateError);
+                   setError("Update failed: Permission denied. Please check RLS policies for updates.");
+               } else {
+                  throw updateError;
+               }
           } else {
               console.log("SettingsPage: Profile updated successfully.");
               setMessage('Profile updated successfully!');
+              // Update local profile state to match saved data
               setProfile(prevProfile => prevProfile ? { ...prevProfile, ...updates } : null);
           }
-      // --- FIXED: Changed 'any' to 'unknown' and added type check ---
       } catch (err: unknown) {
           console.error("Profile Update Error:", err);
-          // Set error message, checking if err is an Error instance
           setError(err instanceof Error ? err.message : 'Failed to update profile.');
       } finally {
           setIsProcessing(false);
@@ -173,45 +192,43 @@ export default function SettingsPage() {
     }
     setIsProcessing(true); setError(null); setMessage(null);
     console.warn("Account deletion initiated - Placeholder logic. Requires secure backend implementation.");
+    // --- Placeholder logic ---
     await new Promise(resolve => setTimeout(resolve, 1000));
     setIsProcessing(false);
     setError("Account deletion requires backend setup (see console warning).");
+    // --- End Placeholder ---
   };
 
   // --- Render Logic ---
-  console.log("SettingsPage: Rendering - Loading:", loading, "User:", !!user, "Profile:", !!profile, "Error:", error);
-
-  // --- Loading State ---
+  // (Loading, Error, and Null states remain largely the same)
   if (loading) {
-    console.log("SettingsPage: Rendering Loading Spinner");
-    return (
-       <div className="min-h-screen flex items-center justify-center">
-         <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-       </div>
-    );
-  }
-
-  // --- Error State (if critical data missing) ---
-  if (error && (!user || !profile)) {
-     console.log("SettingsPage: Rendering error because error exists and user or profile is missing");
       return (
-         <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
-             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert"><strong className="font-bold">Error: </strong><span className="block sm:inline">{error}</span><p className="text-sm mt-1">Please try refreshing the page. If the problem persists, contact support or check your Supabase RLS/Grant configuration.</p></div>
-              <div className="mt-4"><Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">&larr; Back to Dashboard</Link></div>
-         </div>
-     );
+          <div className="min-h-screen flex items-center justify-center">
+              <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+          </div>
+      );
   }
 
-  // --- Null State (if data still loading somehow after loading flag false) ---
+  if (error && (!user || !profile)) {
+      return (
+          <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">
+                  <strong className="font-bold">Error: </strong><span className="block sm:inline">{error}</span>
+                  <p className="text-sm mt-1">Please try refreshing the page. If the problem persists, contact support or check your Supabase RLS/Grant configuration and ensure the &apos;timezone&apos; column exists.</p>
+              </div>
+              <div className="mt-4"><Link href="/dashboard" className="text-sm text-indigo-600 hover:underline">&larr; Back to Dashboard</Link></div>
+          </div>
+      );
+  }
+
   if (!user || !profile) {
-     console.log("SettingsPage: Rendering null because !user or !profile (after loading)");
      return <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8"><p>Loading user data...</p></div>;
   }
 
-  // --- Main Content Render ---
-  console.log("SettingsPage: Rendering main content area...");
+
+  // --- Main Content Render (MODIFIED) ---
   return (
-     <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8 space-y-8 font-sans"> {/* NOTE: font-sans applied here - maybe remove if body applies default? */}
+     <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8 space-y-8 font-sans">
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Settings</h1>
@@ -220,7 +237,6 @@ export default function SettingsPage() {
 
       {/* Feedback Messages */}
       {message && ( <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg relative mb-4" role="alert"><p>{message}</p></div> )}
-      {/* Show non-critical errors only if no success message */}
       {error && !message && ( <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert"><strong className="font-bold">Error: </strong><span className="block sm:inline">{error}</span></div> )}
 
       {/* Profile Info Form */}
@@ -232,6 +248,27 @@ export default function SettingsPage() {
              <label htmlFor="email" className="block text-sm font-medium text-gray-500">Email</label>
             <input id="email" type="email" value={user.email || 'N/A'} readOnly className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm cursor-not-allowed"/>
           </div>
+
+          {/* --- ADDED: Timezone Selector --- */}
+          <div>
+             <label htmlFor="timezone" className="block text-sm font-medium text-gray-700">Timezone</label>
+             <select
+               id="timezone"
+               name="timezone"
+               value={timezone}
+               onChange={(e: ChangeEvent<HTMLSelectElement>) => setTimezone(e.target.value)}
+               disabled={isProcessing}
+               className={`mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md ${isProcessing ? 'bg-gray-100' : ''}`}
+             >
+                <option value="" disabled>Select your timezone</option>
+                {timezones.map(tz => (
+                    <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>
+                ))}
+             </select>
+             <p className="mt-1 text-xs text-gray-500">Affects when daily routines reset and notifications are sent.</p>
+          </div>
+          {/* --- END ADDED --- */}
+
 
           {/* Phone Number (Editable) */}
           <div>
@@ -251,6 +288,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
+
           {/* Save Button */}
           <div className="pt-4">
              <button type="submit" disabled={isProcessing || !profile} className={`inline-flex justify-center items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${(isProcessing || !profile) ? 'opacity-50 cursor-not-allowed' : ''}`}>
@@ -260,7 +298,7 @@ export default function SettingsPage() {
         </div>
       </form>
 
-      {/* Account Actions */}
+      {/* Account Actions (Unchanged from original) */}
        <div className="bg-white shadow-md rounded-lg p-6">
         <h2 className="text-xl font-semibold mb-4 text-gray-800">Account Actions</h2>
         <div className="space-y-4">
