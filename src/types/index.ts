@@ -19,6 +19,7 @@ export type User = {
     name: string;
     timing: HabitTiming;
     created_at: string;
+    sort_order: number | null;
   };
   
   // Rating type (1-5 scale)

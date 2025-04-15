@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, ChangeEvent } from 'react'; // Import ChangeEvent
+import { useState, useEffect, ChangeEvent } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { Habit, HabitTiming } from '@/types'; // Assuming Habit type is defined
 import { ShutdownFormData } from '@/app/shutdown/page'; // Adjust path if needed
@@ -27,28 +27,30 @@ export default function PmHabitsStep({ initialValue, onNext, onBack }: PmHabitsS
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not found");
 
+        // --- MODIFIED: Updated order clause ---
         const { data, error: fetchError } = await supabase
           .from('habits')
           .select('*')
           .eq('user_id', user.id)
-          .in('timing', [HabitTiming.PM, HabitTiming.ANYTIME])
-          .order('name', { ascending: true });
+          .in('timing', [HabitTiming.PM, HabitTiming.ANYTIME]) // Get PM and Anytime habits
+          .order('timing', { ascending: true }) // Order by timing (Anytime then PM)
+          .order('sort_order', { ascending: true, nullsFirst: false }); // Then by user's sort order
 
         if (fetchError) throw fetchError;
 
-        setAvailableHabits(data as Habit[]);
-      // --- FIXED: Changed 'any' to 'unknown' and added type check ---
+        setAvailableHabits(data || []); // Ensure it's an array
+      // --- END MODIFIED ---
       } catch (err: unknown) {
         console.error("Error fetching PM/Anytime habits:", err);
-        // Set error message, checking if err is an Error instance
         setError(err instanceof Error ? err.message : "Failed to load evening/anytime habits.");
+        setAvailableHabits([]); // Set empty on error
       } finally {
         setLoading(false);
       }
     };
 
     fetchPmHabits();
-  }, []);
+  }, []); // Fetch only on mount
 
   // Update internal state if the initialValue prop changes
   useEffect(() => {
@@ -75,6 +77,26 @@ export default function PmHabitsStep({ initialValue, onNext, onBack }: PmHabitsS
     onNext({ completed_pm_anytime_habits: completedHabitsArray });
   };
 
+  // Helper function for timing label (if needed, or use imported one)
+  const getTimingLabel = (timing: HabitTiming) => {
+     switch (timing) {
+       case HabitTiming.AM: return 'Morning'; // Included for completeness, though not fetched here
+       case HabitTiming.PM: return 'Evening';
+       case HabitTiming.ANYTIME: return 'Anytime';
+       default: return String(timing);
+     }
+   };
+   // Helper function for timing color (if needed, or use imported one)
+   const getTimingColor = (timing: HabitTiming) => {
+      switch (timing) {
+        case HabitTiming.AM: return 'bg-yellow-100 text-yellow-800';
+        case HabitTiming.PM: return 'bg-blue-100 text-blue-800';
+        case HabitTiming.ANYTIME: return 'bg-green-100 text-green-800';
+        default: return 'bg-gray-100 text-gray-800';
+      }
+    };
+
+
   return (
     <div className="space-y-6">
       {/* Step Title */}
@@ -82,7 +104,7 @@ export default function PmHabitsStep({ initialValue, onNext, onBack }: PmHabitsS
 
       {/* Instructions */}
       <p className="text-gray-600">
-        Check off the evening or anytime habits you&apos;ve completed today. {/* Fixed unescaped quote */}
+        Check off the evening or anytime habits you&apos;ve completed today.
       </p>
 
       {/* Habits List Area */}
@@ -91,10 +113,10 @@ export default function PmHabitsStep({ initialValue, onNext, onBack }: PmHabitsS
         {error && <p className="text-red-600">Error: {error}</p>}
 
         {!loading && !error && availableHabits.length === 0 && (
-          // --- FIXED: Replaced ' with &apos; ---
           <p className="text-gray-500">No relevant PM or Anytime habits found. You can add habits in the &apos;Manage Habits&apos; section.</p>
         )}
 
+        {/* Render the list */}
         {!loading && !error && availableHabits.length > 0 && (
           availableHabits.map((habit) => (
             <div key={habit.id} className="relative flex items-start">
@@ -105,7 +127,7 @@ export default function PmHabitsStep({ initialValue, onNext, onBack }: PmHabitsS
                   name="pm_anytime_habits"
                   type="checkbox"
                   checked={selectedHabitIds.has(habit.id)}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => handleCheckboxChange(habit.id, e.target.checked)} // Added ChangeEvent
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => handleCheckboxChange(habit.id, e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                 />
               </div>
@@ -113,8 +135,9 @@ export default function PmHabitsStep({ initialValue, onNext, onBack }: PmHabitsS
                 <label htmlFor={`habit-${habit.id}`} className="font-medium text-gray-900">
                   {habit.name}
                 </label>
-                 <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${habit.timing === HabitTiming.PM ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
-                    {habit.timing}
+                 {/* Display timing badge */}
+                 <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getTimingColor(habit.timing)}`}>
+                    {getTimingLabel(habit.timing)}
                  </span>
               </div>
             </div>
@@ -134,7 +157,9 @@ export default function PmHabitsStep({ initialValue, onNext, onBack }: PmHabitsS
         <button
           type="button"
           onClick={handleCompleteClick}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+          // Disable button if loading or error? Optional.
+          disabled={loading || !!error}
+          className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 ${loading || !!error ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           Complete Shutdown
         </button>
