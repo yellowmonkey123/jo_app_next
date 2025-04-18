@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Rating } from '@/types'; // Assuming Rating is 1 | 2 | 3 | 4 | 5
-import { ShutdownFormData } from '@/app/shutdown/page'; // Adjust path if needed
+import { ShutdownFormData } from '@/types'; // Adjust path if needed
 
 // Define the props the component expects
 interface DayRatingStepProps {
