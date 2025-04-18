@@ -209,7 +209,7 @@ export default function StartupPage() {
   }, [currentStep, stepOrder, router]);
 
   // --- Form Submission ---
-  const handleSubmit = async (finalData: StartupFormData) => {
+  async function handleSubmit(finalData: StartupFormData) {
     if (!userId) { setSubmitError("User not identified."); return; }
     setIsSubmitting(true);
     setSubmitError(null);
