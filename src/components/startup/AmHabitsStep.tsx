@@ -1,114 +1,182 @@
+// src/components/startup/AmHabitsStep.tsx
 'use client';
 
-import { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase/client';
-import { Habit, HabitTiming } from '@/types'; // Assuming Habit type is defined
-import { StartupFormData } from '@/app/startup/page'; // Adjust path if needed
+import { Habit, HabitTiming, StartupFormData } from '@/types';
+import { getHabitsForUser } from '@/lib/supabase/habits';
+import { useDailyLogStore } from '@/stores/dailyLogStore'; // Import the store
+import { CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
 
-// Define the props the component expects
 interface AmHabitsStepProps {
-  initialValue: string[]; // Array of initially completed habit IDs
-  onNext: (data: Partial<StartupFormData>) => void; // Callback for final submission trigger
-  onBack: () => void; // Callback to go back
+  initialValue: string[]; // Array of initially *completed* habit IDs for this load
+  onNext: (data: Partial<StartupFormData>) => void;
+  onBack: () => void;
 }
 
 export default function AmHabitsStep({ initialValue, onNext, onBack }: AmHabitsStepProps) {
   const [availableHabits, setAvailableHabits] = useState<Habit[]>([]);
-  const [selectedHabitIds, setSelectedHabitIds] = useState<Set<string>>(new Set(initialValue));
+  // Local state for habits marked "Done" in this session
+  const [doneHabitIds, setDoneHabitIds] = useState<Set<string>>(new Set(initialValue));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch relevant habits when the component mounts
+  // --- Zustand Store Access ---
+  // Get actions from the store
+  const markHabitDeferred = useDailyLogStore((state) => state.markHabitDeferred);
+  const unmarkHabitDeferred = useDailyLogStore((state) => state.unmarkHabitDeferred); // Get the new action
+
+  // Select the raw array of deferred IDs from the store
+  const deferredStartupArray = useDailyLogStore((state) => state.todayLog?.deferred_from_startup);
+  // Create a Set from the array using useMemo for stable reference
+  const deferredHabitIds = useMemo(() => new Set(deferredStartupArray ?? []), [deferredStartupArray]);
+
+
+  // Fetch relevant AM habits on component mount
   useEffect(() => {
     const fetchAmHabits = async () => {
       setLoading(true);
       setError(null);
       try {
+        // Ensure user is available before fetching
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not found");
 
-        // --- MODIFIED: Updated order clause ---
-        const { data, error: fetchError } = await supabase
-          .from('habits')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('timing', HabitTiming.AM) // Filter for AM habits
-          .order('sort_order', { ascending: true, nullsFirst: false }); // Order by user's sort order
+        // Use the service function to get all habits
+        const data = await getHabitsForUser(user.id);
 
-        if (fetchError) throw fetchError;
+        // Filter for AM habits specifically within this component
+        const amHabits = data.filter(h => h.timing === HabitTiming.AM);
+        setAvailableHabits(amHabits);
 
-        setAvailableHabits(data || []); // Ensure it's an array
-      // --- END MODIFIED ---
       } catch (err: unknown) {
         console.error("Error fetching AM habits:", err);
         setError(err instanceof Error ? err.message : "Failed to load morning habits.");
-        setAvailableHabits([]); // Set empty on error
+        setAvailableHabits([]); // Clear habits on error
       } finally {
         setLoading(false);
       }
     };
-
     fetchAmHabits();
-  }, []); // Fetch only on mount
+  }, []); // Empty dependency array ensures this runs only once on mount
 
-  // Update internal state if the initialValue prop changes
+  // Update local "done" state if the initialValue prop changes from parent
   useEffect(() => {
-    setSelectedHabitIds(new Set(initialValue));
+    setDoneHabitIds(new Set(initialValue));
   }, [initialValue]);
 
+  // --- Button Handlers ---
 
-  // Handle checkbox changes
-  const handleCheckboxChange = (habitId: string, isChecked: boolean) => {
-    setSelectedHabitIds(prevIds => {
-      const newIds = new Set(prevIds);
-      if (isChecked) { newIds.add(habitId); } else { newIds.delete(habitId); }
-      return newIds;
+  /**
+   * Handles clicking the "Done" button for a habit.
+   * Adds the habit to the local 'done' set and removes it from the store's 'deferred' list if present.
+   */
+  const handleMarkDone = (habitId: string) => {
+    // Update local "Done" state FIRST
+    setDoneHabitIds(prevIds => {
+        const newIds = new Set(prevIds);
+        newIds.add(habitId);
+        return newIds;
     });
+    // --- Call unmarkHabitDeferred ---
+    // If this habit was previously deferred in the store, remove it now
+    if (deferredHabitIds.has(habitId)) {
+        console.log(`AmHabitsStep: Unmarking deferred habit ${habitId} because it was marked Done.`);
+        unmarkHabitDeferred(habitId, 'startup'); // Call store action
+    }
+    // --- End Call ---
   };
 
-  // Handle clicking the 'Complete Startup' button
+  /**
+   * Handles clicking the "Do Later" button for a habit.
+   * Removes the habit from the local 'done' set and adds it to the store's 'deferred' list.
+   */
+  const handleMarkDeferredClick = (habitId: string) => {
+    // Update local "Done" state FIRST (remove if it was marked done)
+    setDoneHabitIds(prevIds => {
+        const newIds = new Set(prevIds);
+        newIds.delete(habitId);
+        return newIds;
+    });
+    // Call the store action to add to deferred list
+    console.log(`AmHabitsStep: Marking habit ${habitId} as deferred.`);
+    markHabitDeferred(habitId, 'startup');
+  };
+
+  /**
+   * Handles clicking the final "Complete Startup" button.
+   * Passes only the locally marked "Done" habits to the parent.
+   */
   const handleCompleteClick = () => {
-    const completedHabitsArray = Array.from(selectedHabitIds);
+    const completedHabitsArray = Array.from(doneHabitIds);
+    console.log("AmHabitsStep: Completing step with done habits:", completedHabitsArray);
     onNext({ completed_am_habits: completedHabitsArray });
   };
 
+  // --- Render Logic ---
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold text-gray-800">Completed AM Habits</h2>
+      {/* Updated descriptive text to match desired logic */}
       <p className="text-gray-600">
-        Check off the morning habits you&apos;ve completed today.
+        Mark your morning habits as "Done" or choose to "Do Later". Deferred habits can be confirmed during your Evening Shutdown.
       </p>
       <div className="space-y-3 max-h-60 overflow-y-auto border border-gray-200 rounded-md p-4">
+        {/* Loading State */}
         {loading && <p className="text-gray-500">Loading habits...</p>}
+        {/* Error State */}
         {error && <p className="text-red-600">Error: {error}</p>}
-
+        {/* Empty State */}
         {!loading && !error && availableHabits.length === 0 && (
           <p className="text-gray-500">No morning habits found. You can add habits in the &apos;Manage Habits&apos; section.</p>
         )}
 
-        {/* Render the list */}
+        {/* Habit List */}
         {!loading && !error && availableHabits.length > 0 && (
-          availableHabits.map((habit) => (
-            <div key={habit.id} className="relative flex items-start">
-              <div className="flex h-6 items-center">
-                <input
-                  id={`habit-${habit.id}`}
-                  aria-describedby={`habit-description-${habit.id}`}
-                  name="am_habits"
-                  type="checkbox"
-                  checked={selectedHabitIds.has(habit.id)}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => handleCheckboxChange(habit.id, e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-              </div>
-              <div className="ml-3 text-sm leading-6">
-                <label htmlFor={`habit-${habit.id}`} className="font-medium text-gray-900">
+          availableHabits.map((habit) => {
+            // Determine current status based on local 'done' state and store's 'deferred' state
+            const isDone = doneHabitIds.has(habit.id);
+            const isDeferredInStore = deferredHabitIds.has(habit.id);
+            // A habit is considered deferred for display *only if* it's in the deferred store list
+            // AND it hasn't been marked as done locally in *this* session.
+            const displayDeferred = isDeferredInStore && !isDone;
+            const displayDone = isDone;
+
+            return (
+              <div key={habit.id} className="flex items-center justify-between py-1">
+                {/* Habit Name - Style differently if deferred and not done */}
+                <span className={`text-sm ${displayDeferred ? 'text-gray-400 italic' : 'text-gray-900'}`}>
                   {habit.name}
-                  {/* No timing badge needed here as they are all AM */}
-                </label>
+                </span>
+
+                {/* Action Buttons */}
+                <div className="flex items-center space-x-2">
+                   {/* "Do Later" Button */}
+                   <button
+                      type="button"
+                      onClick={() => handleMarkDeferredClick(habit.id)}
+                      title="Do Later"
+                      // Style based on deferred status, disable if marked done locally
+                      className={`p-1 rounded-full ${displayDeferred ? 'bg-orange-100 text-orange-600' : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50'} ${displayDone ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      disabled={displayDone} // Prevent deferring if marked done locally
+                    >
+                      <ClockIcon className="h-5 w-5" />
+                   </button>
+
+                   {/* "Done" Button */}
+                   <button
+                      type="button"
+                      onClick={() => handleMarkDone(habit.id)}
+                      title="Done"
+                      // Style based only on local 'done' status
+                      className={`p-1 rounded-full ${displayDone ? 'bg-green-100 text-green-600' : 'text-gray-400 hover:text-green-500 hover:bg-green-50'}`}
+                    >
+                       <CheckCircleIcon className="h-5 w-5" />
+                   </button>
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
       {/* Navigation Buttons */}
@@ -123,7 +191,7 @@ export default function AmHabitsStep({ initialValue, onNext, onBack }: AmHabitsS
         <button
             type="button"
             onClick={handleCompleteClick}
-            disabled={loading || !!error} // Disable if loading or error
+            disabled={loading || !!error} // Disable if loading or error fetching habits
             className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 ${loading || !!error ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
             Complete Startup

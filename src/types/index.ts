@@ -12,6 +12,23 @@ export type User = {
     ANYTIME = 'ANYTIME'
   }
   
+ 
+  export interface StartupFormData {
+    prev_evening_rating: Rating | null;
+    sleep_rating: Rating | null;
+    morning_rating: Rating | null;
+    feeling_morning: string;
+    completed_am_habits: string[]; // Array of completed habit IDs
+  }
+
+  export interface ShutdownFormData {
+    day_rating: Rating | null;
+    accomplishment: string;
+    improvement: string;
+    completed_pm_anytime_habits: string[]; // Array of completed habit IDs
+  }
+  
+
   // Habit type
   export type Habit = {
     id: string;
@@ -45,6 +62,10 @@ export type User = {
     // Habit tracking
     completed_am_habits: string[];
     completed_pm_anytime_habits: string[];
+
+    // Deferred habits
+    deferred_from_startup?: string[] | null; // Array of habit IDs deferred from startup
+    deferred_from_shutdown?: string[] | null; // Array of habit IDs deferred from shutdown
     
     // Completion timestamps
     startup_completed_at?: string;
@@ -69,3 +90,5 @@ export type User = {
     IMPROVEMENT = 'improvement',
     PM_ANYTIME_HABITS = 'pm-anytime-habits'
   }
+
+

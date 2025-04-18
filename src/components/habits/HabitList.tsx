@@ -2,8 +2,12 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 // Import the Habit type and the HabitTiming enum
-import { Habit, HabitTiming } from '@/types'; // Assuming Habit includes 'id', 'timing', 'sort_order' etc.
+import { Habit, HabitTiming } from '@/types';
+// *** Import the NEW service functions ***
+import { getHabitsForUser, deleteHabitById, updateHabitOrder } from '@/lib/supabase/habits';
+// We still need the client for auth check, OR move auth check elsewhere (e.g., layout)
 import { supabase } from '@/lib/supabase/client';
+
 
 // dnd-kit Imports
 import {
@@ -34,10 +38,9 @@ interface HabitListProps {
 }
 
 // Constants and Helpers
-// Use the HabitTiming enum members directly for type safety
 const timingGroups: HabitTiming[] = [HabitTiming.AM, HabitTiming.ANYTIME, HabitTiming.PM];
 
-// Helper functions remain the same, they correctly accept HabitTiming type
+// *** RESTORED Implementation ***
 const getTimingLabel = (timing: HabitTiming): string => {
    switch (timing) {
      case HabitTiming.AM: return 'Morning';
@@ -52,6 +55,7 @@ const getTimingLabel = (timing: HabitTiming): string => {
    }
  };
 
+// *** RESTORED Implementation ***
 const getTimingColor = (timing: HabitTiming): string => {
    switch (timing) {
     case HabitTiming.AM: return 'bg-yellow-100 text-yellow-800';
@@ -66,6 +70,7 @@ const getTimingColor = (timing: HabitTiming): string => {
    }
  };
 
+// *** RESTORED Implementation ***
 // SortableHabitItem Sub-Component
 interface SortableHabitItemProps {
     habit: Habit; // Expects a full Habit object
@@ -73,6 +78,7 @@ interface SortableHabitItemProps {
     onDelete: (id: string) => void; // Assuming ID is string/uuid
 }
 
+// *** RESTORED Implementation ***
 function SortableHabitItem({ habit, onEdit, onDelete }: SortableHabitItemProps) {
   const {
     attributes,
@@ -133,7 +139,7 @@ function SortableHabitItem({ habit, onEdit, onDelete }: SortableHabitItemProps) 
 }
 
 
-// --- Main HabitList Component ---
+// --- Main HabitList Component (Updated Logic) ---
 export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
   // State
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -142,72 +148,71 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
 
   // dnd-kit Sensors setup
   const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+      useSensor(PointerSensor),
+      useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
   // Effect to fetch habits
   useEffect(() => {
     fetchHabits();
-  }, [refreshKey]);
+  }, [refreshKey]); // Dependency array ensures fetch runs when refreshKey changes
 
-  // Data Fetching Function
+  // --- Data Fetching Function (Uses Service) ---
   const fetchHabits = async () => {
     try {
       setLoading(true);
       setError(null);
+      // Still need to get the user ID here
       const { data: { user }, error: userError } = await supabase.auth.getUser();
-
       if (userError) throw new Error(`Authentication error: ${userError.message}`);
       if (!user) {
         console.warn("HabitList: No authenticated user found.");
         setHabits([]);
-        return;
+        setLoading(false); // Ensure loading stops if no user
+        return; // Exit early
       }
 
-      // Fetch habits, ordered by timing then sort_order
-      const { data, error: fetchError } = await supabase
-        .from('habits')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('timing', { ascending: true }) // Sorts based on the enum string values ('AM', 'ANYTIME', 'PM')
-        .order('sort_order', { ascending: true, nullsFirst: false });
-
-      if (fetchError) throw fetchError;
-      setHabits(data || []);
+      // *** Call the service function ***
+      const fetchedHabits = await getHabitsForUser(user.id);
+      setHabits(fetchedHabits);
 
     } catch (err: unknown) {
-      console.error('Error fetching habits:', err);
+      // Catch errors thrown by the service function or getUser
+      console.error('Component Error: Fetching habits failed:', err);
+      // Set error state for the UI
       setError(err instanceof Error ? err.message : 'An unexpected error occurred while loading habits.');
-      setHabits([]);
+      setHabits([]); // Clear habits on error
     } finally {
       setLoading(false);
     }
   };
 
-  // Delete Habit Function
+  // --- Delete Habit Function (Uses Service) ---
   const deleteHabit = async (id: string) => {
      if (!confirm('Are you sure you want to delete this habit? This action cannot be undone.')) {
         return;
      }
+     // Consider adding a loading state specific to deletion?
      try {
-       setError(null);
-       const { error: deleteError } = await supabase
-         .from('habits')
-         .delete()
-         .eq('id', id);
+       setError(null); // Clear previous errors
 
-       if (deleteError) throw deleteError;
+       // *** Call the service function ***
+       await deleteHabitById(id);
+
+       // Update local state immediately on success
        setHabits(prevHabits => prevHabits.filter(habit => habit.id !== id));
 
      } catch (err: unknown) {
-       console.error('Error deleting habit:', err);
+       // Catch errors thrown by the service function
+       console.error('Component Error: Deleting habit failed:', err);
+       // Set error state for the UI
        setError(err instanceof Error ? err.message : 'Failed to delete the habit.');
+       // Optional: Refetch habits here if delete fails to ensure UI consistency
+       // fetchHabits();
      }
   };
 
+  // *** RESTORED Implementation ***
   // Memoized Grouping of Habits by Timing
   const groupedHabits = useMemo(() => {
     if (!Array.isArray(habits)) { return {}; }
@@ -219,33 +224,40 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
     return groups;
   }, [habits]);
 
-  // --- Save Order Action ---
-  // REMOVED unused _timing parameter
+  // --- Save Order Action (Uses Service) ---
   const saveNewOrder = async (reorderedGroup: Habit[]) => {
-    setError(null);
-    const updates = reorderedGroup.map((habit, index) => ({
-      id: habit.id,
-      sort_order: index,
-    }));
+    setError(null); // Clear previous errors
 
-    if (updates.length === 0) return;
+    // 1. Extract just the IDs in the new order
+    const orderedIds = reorderedGroup.map(habit => habit.id);
+
+    // 2. Check if there's anything to save
+    if (orderedIds.length === 0) {
+        console.log("No habits in the reordered group to save.");
+        return;
+    }
+
+    console.log("Component: Attempting to save new order via service:", orderedIds);
+    // Consider adding a saving/loading state specific to reordering?
 
     try {
-        // Perform individual updates (consider optimizing with RPC later)
-        for (const update of updates) {
-            const { error: updateError } = await supabase
-                .from('habits')
-                .update({ sort_order: update.sort_order })
-                .eq('id', update.id);
-            if (updateError) throw updateError;
-        }
+        // 3. *** Call the service function ***
+        await updateHabitOrder(orderedIds);
+
+        console.log("Component: Successfully saved new order via service.");
+        // Optional: Add user feedback like a success toast/message
+
     } catch (err: unknown) {
-      console.error('Error saving habit order during UPDATE loop:', err);
-      setError(err instanceof Error ? err.message : 'Failed to save the new habit order. Please try again.');
-      // fetchHabits(); // Optional: Revert UI on failure
+      // 4. Catch errors thrown by the service function
+      console.error('Component Error: Saving habit order failed:', err);
+      // Set error state for the UI
+      setError(err instanceof Error ? err.message : 'Failed to save the new habit order.');
+      // Optional: Revert the optimistic UI update by refetching
+      // fetchHabits();
     }
   };
 
+  // *** RESTORED Implementation ***
   // --- Drag End Handler ---
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -273,9 +285,8 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
 
         const reorderedGroup = arrayMove(currentGroupItems, oldIndex, newIndex);
 
-        // Call saveNewOrder in the background
-        // REMOVED unused currentTimingGroup argument
-        saveNewOrder(reorderedGroup);
+        // Call the updated saveNewOrder function in the background
+        saveNewOrder(reorderedGroup); // Pass the reordered group
 
         // Reconstruct the full habits array for immediate UI update
         const newHabitsArray: Habit[] = [];
@@ -291,11 +302,13 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
     });
   }
 
+  // *** RESTORED Implementation ***
   // --- Conditional Rendering ---
   if (loading) {
     return <div className="py-4 text-center text-gray-500">Loading habits...</div>;
   }
 
+  // *** RESTORED Implementation ***
   if (!loading && habits.length === 0 && !error) {
      return (
        <div className="text-center py-10 px-6 bg-gray-50 rounded-lg mt-6">
@@ -306,38 +319,56 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
      );
   }
 
+  // *** RESTORED Implementation ***
   // --- Main Render Output ---
   return (
     <div className="mt-6">
       <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Your Habits</h3>
+      {/* Error Display Area */}
       {error && (
           <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 my-4 rounded-md shadow" role="alert">
               <p className="font-semibold">Error</p>
               <p>{error}</p>
+              {/* Optional: Add a retry button */}
+              {/* <button onClick={fetchHabits} className="mt-2 text-sm font-medium text-red-800 hover:text-red-600">Retry</button> */}
           </div>
       )}
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} >
-        {/* Use the enum-based timingGroups array for mapping */}
-        {timingGroups.map((timing) => { // `timing` here is a HabitTiming enum member
+      {/* Drag and Drop Context Provider */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        {/* Iterate over the defined timing groups to render sections */}
+        {timingGroups.map((timing) => {
+          // Safely access the habits for the current group, default to empty array
           const currentGroupHabits = groupedHabits?.[timing] || [];
+          // Get just the IDs for the SortableContext items prop
           const habitIds = currentGroupHabits.map(h => h.id);
+
+          // Don't render a section if there are no habits for this timing
           if (currentGroupHabits.length === 0) return null;
 
+          // Render the section for the current timing group
           return (
-            <div key={timing} className="mb-8"> {/* Use enum value as key */}
+            <div key={timing} className="mb-8">
+              {/* Group Header */}
               <div className="pb-2 mb-2 border-b-2 border-gray-300">
-                 {/* Pass enum member to helper functions */}
                  <h4 className="text-md font-semibold text-gray-700">{getTimingLabel(timing)} Habits</h4>
               </div>
+              {/* Sortable Context for this group */}
               <SortableContext items={habitIds} strategy={verticalListSortingStrategy}>
+                {/* List container */}
                 <ul role="list" className="-my-5 divide-y divide-gray-200">
+                  {/* Map over habits in this group */}
                   {currentGroupHabits.map((habit) => (
+                    // Render the SortableHabitItem component
                     <SortableHabitItem
-                      key={habit.id}
+                      key={habit.id} // Use habit's unique ID as key
                       habit={habit}
                       onEdit={onEdit}
-                      onDelete={deleteHabit}
+                      onDelete={deleteHabit} // Pass the delete handler
                     />
                   ))}
                 </ul>
@@ -347,5 +378,5 @@ export default function HabitList({ onEdit, refreshKey }: HabitListProps) {
         })}
       </DndContext>
     </div>
-  );
-}
+  ); // End main return
+} // End HabitList component
