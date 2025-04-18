@@ -112,8 +112,8 @@ export const useDailyLogStore = create<DailyLogState>((set, get) => ({
     }
 
 
-    let updatedDeferredStartup = [...(currentTodayLog.deferred_from_startup || [])];
-    let updatedDeferredShutdown = [...(currentTodayLog.deferred_from_shutdown || [])];
+    const updatedDeferredStartup = [...(currentTodayLog.deferred_from_startup || [])];
+    const updatedDeferredShutdown = [...(currentTodayLog.deferred_from_shutdown || [])];
     let needsUpdate = false; // Flag to check if an update is actually needed
 
     // Add the habit ID to the correct array, avoiding duplicates

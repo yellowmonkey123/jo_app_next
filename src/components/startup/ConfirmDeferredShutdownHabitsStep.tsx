@@ -9,33 +9,30 @@ import LoadingSpinner from '@/components/LoadingSpinner'; // Assuming this exist
 
 // Define props (navigation callbacks)
 interface ConfirmDeferredShutdownHabitsStepProps {
-  onNext: () => void; // Go to the next step in Startup sequence
-  onBack: () => void; // Go back (likely to dashboard)
+  onNext: () => void; // Go to the next step in Shutdown sequence
+  onBack: () => void; // Go back to the previous step
 }
 
 export default function ConfirmDeferredShutdownHabitsStep({ onNext, onBack }: ConfirmDeferredShutdownHabitsStepProps) {
   // --- State ---
-  const [allUserHabits, setAllUserHabits] = useState<Habit[]>([]);
   const [loadingHabits, setLoadingHabits] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [habitsInThisStep, setHabitsInThisStep] = useState<Habit[]>([]);
   const [confirmations, setConfirmations] = useState<Record<string, boolean | null>>({});
 
   // --- Zustand Store Access ---
-  // Get deferred habit IDs from *yesterday's* log shutdown list ONCE for initialization
-  // We select it outside useEffect to get the initial value for the effect logic
+  // Get deferred habit IDs from yesterday's shutdown list ONCE for initialization
   const initialDeferredIds = useDailyLogStore((state) => state.yesterdayLog?.deferred_from_shutdown ?? []);
   const confirmDeferredHabitAction = useDailyLogStore((state) => state.confirmDeferredHabit);
 
   // --- Data Fetching & Initializing Local Habit List ---
   useEffect(() => {
-    // Use the initialDeferredIds captured on first render
     const fetchAndSetHabits = async () => {
       if (initialDeferredIds.length === 0) {
-          setLoadingHabits(false);
-          console.log("ConfirmDeferredShutdownHabitsStep: No habits deferred from yesterday's shutdown, calling onNext.");
-          onNext(); // Advance immediately if nothing to confirm
-          return;
+        setLoadingHabits(false);
+        console.log("ConfirmDeferredShutdownHabitsStep: No habits deferred from yesterday's shutdown, calling onNext.");
+        onNext();
+        return;
       }
 
       setLoadingHabits(true);
@@ -45,32 +42,28 @@ export default function ConfirmDeferredShutdownHabitsStep({ onNext, onBack }: Co
 
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error("User not found");
+        if (!user) throw new Error('User not found');
         const habits = await getHabitsForUser(user.id);
-        setAllUserHabits(habits); // Store all habits
 
-        const deferredSet = new Set(initialDeferredIds); // Use the initial IDs
+        const deferredSet = new Set(initialDeferredIds);
         const initialHabitsToConfirm = habits.filter(habit => deferredSet.has(habit.id));
-        setHabitsInThisStep(initialHabitsToConfirm); // Set the local list
+        setHabitsInThisStep(initialHabitsToConfirm);
 
         const initialConfirmations: Record<string, boolean | null> = {};
         initialHabitsToConfirm.forEach(habit => {
-            initialConfirmations[habit.id] = null;
+          initialConfirmations[habit.id] = null;
         });
         setConfirmations(initialConfirmations);
-
       } catch (err) {
-        console.error("Error fetching habits for confirmation step:", err);
-        setFetchError(err instanceof Error ? err.message : "Failed to load habit details.");
+        console.error('Error fetching habits for confirmation step:', err);
+        setFetchError(err instanceof Error ? err.message : 'Failed to load habit details.');
       } finally {
         setLoadingHabits(false);
       }
     };
 
     fetchAndSetHabits();
-    // --- REMOVED deferredHabitIds from dependency array ---
-    // This effect should only run once based on the initial IDs, or if onNext/onBack change (unlikely)
-  }, [onNext, onBack]); // Pass stable functions if possible, or remove if guaranteed stable
+  }, [onNext, onBack, initialDeferredIds]);
 
   // --- Event Handlers ---
   const handleConfirmation = useCallback((habitId: string, didComplete: boolean) => {
@@ -79,34 +72,32 @@ export default function ConfirmDeferredShutdownHabitsStep({ onNext, onBack }: Co
     confirmDeferredHabitAction(habitId, 'shutdown', didComplete);
 
     const allNowConfirmed = habitsInThisStep.every(
-        habit => updatedConfirmations[habit.id] !== null && updatedConfirmations[habit.id] !== undefined
+      habit => updatedConfirmations[habit.id] !== null && updatedConfirmations[habit.id] !== undefined
     );
 
-    if (allNowConfirmed && habitsInThisStep.length > 0) { // Ensure list wasn't empty initially
-        console.log("ConfirmDeferredShutdownHabitsStep: All habits confirmed, calling onNext.");
-        onNext();
+    if (allNowConfirmed && habitsInThisStep.length > 0) {
+      console.log('ConfirmDeferredShutdownHabitsStep: All habits confirmed, calling onNext.');
+      onNext();
     }
   }, [confirmations, habitsInThisStep, confirmDeferredHabitAction, onNext]);
 
   // Check if all displayed habits have been confirmed
   const allConfirmed = useMemo(() => {
-      if (habitsInThisStep.length === 0) return true;
-      return habitsInThisStep.every(habit => confirmations[habit.id] !== undefined && confirmations[habit.id] !== null);
+    if (habitsInThisStep.length === 0) return true;
+    return habitsInThisStep.every(habit => confirmations[habit.id] !== null && confirmations[habit.id] !== undefined);
   }, [habitsInThisStep, confirmations]);
 
   const handleNextClick = useCallback(() => {
-      if (!allConfirmed) {
-         alert("Please confirm status (Yes/No) for all deferred habits.");
-         return;
-      }
-      console.log("ConfirmDeferredShutdownHabitsStep: Next button clicked, calling onNext.");
-      onNext();
+    if (!allConfirmed) {
+      alert('Please confirm status (Yes/No) for all deferred habits.');
+      return;
+    }
+    console.log('ConfirmDeferredShutdownHabitsStep: Next button clicked, calling onNext.');
+    onNext();
   }, [allConfirmed, onNext]);
-
 
   // --- Render Logic ---
   if (loadingHabits) {
-    // Show spinner covering the area while loading
     return <div className="min-h-[200px] flex items-center justify-center"><LoadingSpinner /></div>;
   }
 
@@ -114,7 +105,6 @@ export default function ConfirmDeferredShutdownHabitsStep({ onNext, onBack }: Co
     return <div className="text-center p-4 text-red-600">Error loading habit details: {fetchError}</div>;
   }
 
-  // Main render logic - list deferred habits based on LOCAL state habitsInThisStep
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold text-gray-800">Confirm Deferred Habits</h2>
@@ -122,25 +112,23 @@ export default function ConfirmDeferredShutdownHabitsStep({ onNext, onBack }: Co
         Did you complete these habits after your shutdown routine yesterday?
       </p>
       <div className="space-y-4 border border-gray-200 rounded-md p-4">
-        {/* Render based on habitsInThisStep */}
         {habitsInThisStep.map((habit) => {
           const confirmationStatus = confirmations[habit.id];
           return (
             <div key={habit.id} className="p-3 bg-gray-50 rounded-md flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-2 sm:space-y-0">
               <span className="text-sm font-medium text-gray-800">{habit.name}</span>
-              {/* Yes/No Buttons */}
               <div className="flex items-center space-x-3 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => handleConfirmation(habit.id, true)}
-                  className={`px-3 py-1 text-sm rounded-md border ${confirmationStatus === true ? 'bg-green-600 text-white border-green-600' : 'bg-white text-green-700 border-green-300 hover:bg-green-50'}`}
+                  className={`px-3 py-1 text-sm rounded-md border ${confirmationStatus === true ? 'bg-green-600 text-white border-green-600' : 'bg-white text-green-700 border-gray-300 hover:bg-green-50'}`}
                 >
                   Yes
                 </button>
                 <button
                   type="button"
                   onClick={() => handleConfirmation(habit.id, false)}
-                  className={`px-3 py-1 text-sm rounded-md border ${confirmationStatus === false ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-700 border-red-300 hover:bg-red-50'}`}
+                  className={`px-3 py-1 text-sm rounded-md border ${confirmationStatus === false ? 'bg-red-600 text-white border-red-600' : 'bg-white text-red-700 border-gray-300 hover:bg-red-50'}`}
                 >
                   No
                 </button>
@@ -148,12 +136,10 @@ export default function ConfirmDeferredShutdownHabitsStep({ onNext, onBack }: Co
             </div>
           );
         })}
-        {/* Show message only if loading finished and list is truly empty */}
-         {habitsInThisStep.length === 0 && !loadingHabits && !fetchError && (
-             <p className="text-gray-500 text-center py-4">No habits were deferred from yesterday's shutdown.</p>
-         )}
+        {habitsInThisStep.length === 0 && !loadingHabits && !fetchError && (
+          <p className="text-gray-500 text-center py-4">No habits were deferred from yesterday&apos;s shutdown.</p>
+        )}
       </div>
-
       {/* Navigation Buttons */}
       <div className="flex justify-between pt-6">
         <button
