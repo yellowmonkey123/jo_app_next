@@ -143,7 +143,7 @@ export default function PmHabitsStep({ initialValue, onNext, onBack }: PmHabitsS
       <h2 className="text-xl font-semibold text-gray-800">Completed PM & Anytime Habits</h2>
       {/* Updated descriptive text to match desired logic */}
       <p className="text-gray-600">
-        Mark your evening & anytime habits as "Done" or "Do Later". Deferred habits can be confirmed during your next Morning Startup.
+        Mark your evening &amp; anytime habits as &quot;Done&quot; or &quot;Do Later&quot;. Deferred habits can be confirmed during your next Morning Startup.
       </p>
       <div className="space-y-3 max-h-60 overflow-y-auto border border-gray-200 rounded-md p-4">
         {/* Loading State */}

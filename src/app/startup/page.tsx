@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react'; // Added useCallback
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import { StartupStep, Rating, Habit, StartupFormData, DailyLog } from '@/types';
+import { StartupStep, StartupFormData, DailyLog } from '@/types';
 import Link from 'next/link';
 import { useDailyLogStore } from '@/stores/dailyLogStore';
 // Utility to get local date (assuming you have one, maybe move to lib/utils)
@@ -70,7 +70,6 @@ export default function StartupPage() {
 
   // --- Zustand Store Access ---
   const {
-    todayLog, // Needed to ensure store is loaded before proceeding
     yesterdayLog,
     loading: storeLoading, // Use store loading state during fetch
     error: storeError,
@@ -196,7 +195,7 @@ export default function StartupPage() {
       // Ensure the final step's data is included
       handleSubmit({ ...formData, ...(stepData || {}) });
     }
-  }, [currentStep, stepOrder, formData]); // Added formData dependency
+  }, [currentStep, stepOrder, formData, handleSubmit]); // Added formData dependency
 
   const handlePrevStep = useCallback(() => {
     if (!currentStep) return;

@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import { ShutdownStep, Rating, Habit, ShutdownFormData, DailyLog } from '@/types';
+import { ShutdownStep, ShutdownFormData, DailyLog } from '@/types';
 import Link from 'next/link';
 import { useDailyLogStore } from '@/stores/dailyLogStore';
 

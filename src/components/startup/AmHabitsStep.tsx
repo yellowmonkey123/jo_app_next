@@ -119,7 +119,7 @@ export default function AmHabitsStep({ initialValue, onNext, onBack }: AmHabitsS
       <h2 className="text-xl font-semibold text-gray-800">Completed AM Habits</h2>
       {/* Updated descriptive text to match desired logic */}
       <p className="text-gray-600">
-        Mark your morning habits as "Done" or choose to "Do Later". Deferred habits can be confirmed during your Evening Shutdown.
+        Mark your morning habits as &quot;Done&quot; or choose to &quot;Do Later&quot;. Deferred habits can be confirmed during your Evening Shutdown.
       </p>
       <div className="space-y-3 max-h-60 overflow-y-auto border border-gray-200 rounded-md p-4">
         {/* Loading State */}

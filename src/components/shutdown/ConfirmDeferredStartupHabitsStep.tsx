@@ -16,7 +16,6 @@ interface ConfirmDeferredStartupHabitsStepProps {
 
 export default function ConfirmDeferredStartupHabitsStep({ onNext, onBack }: ConfirmDeferredStartupHabitsStepProps) {
   // --- State ---
-  const [allUserHabits, setAllUserHabits] = useState<Habit[]>([]);
   const [loadingHabits, setLoadingHabits] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [habitsInThisStep, setHabitsInThisStep] = useState<Habit[]>([]);
@@ -47,7 +46,6 @@ export default function ConfirmDeferredStartupHabitsStep({ onNext, onBack }: Con
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not found");
         const habits = await getHabitsForUser(user.id);
-        setAllUserHabits(habits); // Store all habits
 
         const deferredSet = new Set(initialDeferredIds); // Use the initial IDs
         const initialHabitsToConfirm = habits.filter(habit => deferredSet.has(habit.id));
@@ -69,7 +67,7 @@ export default function ConfirmDeferredStartupHabitsStep({ onNext, onBack }: Con
 
     fetchAndSetHabits();
     // --- REMOVED deferredHabitIds from dependency array ---
-  }, [onNext, onBack]); // Pass stable functions if possible, or remove if guaranteed stable
+  }, [onNext, onBack, initialDeferredIds]); // Pass stable functions if possible, or remove if guaranteed stable
 
   // --- Event Handlers ---
   const handleConfirmation = useCallback((habitId: string, didComplete: boolean) => {
@@ -148,7 +146,7 @@ export default function ConfirmDeferredStartupHabitsStep({ onNext, onBack }: Con
         })}
         {/* Show message only if loading finished and list is truly empty */}
          {habitsInThisStep.length === 0 && !loadingHabits && !fetchError && (
-             <p className="text-gray-500 text-center py-4">No habits were deferred from today's startup.</p>
+             <p className="text-gray-500 text-center py-4">No habits were deferred from today&apos;s startup.</p>
          )}
       </div>
 
