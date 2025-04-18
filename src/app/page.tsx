@@ -1,40 +1,25 @@
-'use client';
+// src/app/page.tsx
+import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
+import { createServerComponentClient } from '@supabase/ssr'
+import type { Database } from '@/lib/types'  // adjust path if your types lives elsewhere
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
+export default async function Home() {
+  // Initialize a Supabase client that runs on the server,
+  // using the incoming request cookies to read the session.
+  const supabase = createServerComponentClient<Database>({ cookies })
 
-export default function Home() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  // Fetch the session
+  const {
+    data: { session },
+    error
+  } = await supabase.auth.getSession()
 
-  useEffect(() => {
-    // Check auth state
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        // Fetch today's log to determine if we should show startup or shutdown
-        // For now, we'll just redirect to dashboard
-        router.push('/dashboard');
-      } else {
-        // Not logged in, redirect to sign in
-        router.push('/auth/signin');
-      }
-      setLoading(false);
-    };
-
-    checkUser();
-  }, [router]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
-      </div>
-    );
+  // If there's an error or no session, redirect to sign‑in
+  if (error || !session) {
+    return redirect('/auth/signin')
   }
 
-  // This shouldn't render as we redirect in useEffect
-  return null;
+  // Otherwise send the user straight to dashboard
+  return redirect('/dashboard')
 }

@@ -27,3 +27,13 @@ export function getLocalDateString(timezone: string): string {
 
 // Add other date-related utility functions here if needed in the future
 
+export function stripUndefined<T extends object>(obj: T): Partial<T> {
+    const result: Partial<T> = {};
+    for (const [key, value] of Object.entries(obj) as [keyof T, T[keyof T]][]) {
+      if (value !== undefined) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+  
