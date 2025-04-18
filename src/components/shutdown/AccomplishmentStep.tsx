@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, ChangeEvent } from 'react'; // Import ChangeEvent
-import { ShutdownFormData } from '@/app/shutdown/page'; // Adjust path if needed
+import { ShutdownFormData } from '@/types'; // Adjust path if needed
 
 // Define the props the component expects
 interface AccomplishmentStepProps {
