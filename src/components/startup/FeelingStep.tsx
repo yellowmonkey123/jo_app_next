@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, ChangeEvent } from 'react'; // Import ChangeEvent
-import { StartupFormData } from '@/app/startup/page'; // Adjust path if needed, or define locally
+import { StartupFormData } from '@/types'; // Adjust path if needed
 
 // Define the props the component expects
 interface FeelingStepProps {

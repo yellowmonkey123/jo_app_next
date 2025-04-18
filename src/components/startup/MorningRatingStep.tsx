@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Rating } from '@/types'; // Assuming Rating is 1 | 2 | 3 | 4 | 5
-import { StartupFormData } from '@/app/startup/page'; // Import the form data type if defined there, or define locally
+import { StartupFormData } from '@/types'; // Adjust path if needed
 
 // Define the props the component expects
 interface MorningRatingStepProps {
