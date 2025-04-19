@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { StartupFormData, DailyLog, StartupStep } from '@/types';
+import { StartupFormData, StartupStep } from '@/types';
 import { useDailyLogStore } from '@/stores/dailyLogStore';
 import { useInitializeSequence } from '@/lib/hooks/useInitializeSequence';
 import { getLocalDateString, stripUndefined } from '@/lib/utils/dateUtils';
@@ -79,9 +79,43 @@ export default function StartupPage() {
   }, [isInitializing, showConfirmation]);
 
   // Navigate forward
+  const submit = useCallback(
+    async (data: StartupFormData) => {
+      if (!userId) {
+        setSubmitError('User not identified');
+        return;
+      }
+      setIsSubmitting(true);
+      setSubmitError(null);
+      try {
+        const logDate = getLocalDateString(timezone);
+        const payload = stripUndefined({
+          user_id: userId,
+          log_date: logDate,
+          prev_evening_rating: data.prev_evening_rating,
+          sleep_rating: data.sleep_rating,
+          morning_rating: data.morning_rating,
+          feeling_morning: data.feeling_morning,
+          completed_am_habits: data.completed_am_habits,
+          startup_completed_at: new Date().toISOString(),
+        });
+        const { error } = await supabase
+          .from('daily_logs')
+          .upsert(payload, { onConflict: 'user_id, log_date' });
+        if (error) throw error;
+        router.push('/dashboard?startup=complete');
+      } catch (e: unknown) {
+        setSubmitError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [userId, timezone, router, setSubmitError, setIsSubmitting], // Removed supabase
+  );
+
   const handleNext = useCallback(
     (stepData?: Partial<StartupFormData>) => {
-      if (stepData) setFormData(prev => ({ ...prev, ...stepData }));
+      if (stepData) setFormData((prev) => ({ ...prev, ...stepData }));
       if (!currentStep) return;
       const idx = stepOrder.indexOf(currentStep);
       if (idx + 1 < stepOrder.length) {
@@ -90,10 +124,9 @@ export default function StartupPage() {
         submit({ ...formData, ...(stepData || {}) });
       }
     },
-    [currentStep, stepOrder, formData]
+    [currentStep, stepOrder, formData, submit],
   );
 
-  // Navigate backward or cancel
   const handleBack = useCallback(() => {
     if (!currentStep) return;
     const idx = stepOrder.indexOf(currentStep);
@@ -103,35 +136,6 @@ export default function StartupPage() {
       router.push('/dashboard');
     }
   }, [currentStep, stepOrder, router]);
-
-  // Final submission
-  async function submit(data: StartupFormData) {
-    if (!userId) { setSubmitError('User not identified'); return; }
-    setIsSubmitting(true);
-    setSubmitError(null);
-    try {
-      const logDate = getLocalDateString(timezone);
-      const payload = stripUndefined({
-        user_id:              userId,
-        log_date:             logDate,
-        prev_evening_rating:  data.prev_evening_rating,
-        sleep_rating:         data.sleep_rating,
-        morning_rating:       data.morning_rating,
-        feeling_morning:      data.feeling_morning,
-        completed_am_habits:  data.completed_am_habits,
-        startup_completed_at: new Date().toISOString(),
-      });
-      const { error } = await supabase
-        .from('daily_logs')
-        .upsert(payload, { onConflict: 'user_id, log_date' });
-      if (error) throw error;
-      router.push('/dashboard?startup=complete');
-    } catch (e: unknown) {
-      setSubmitError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
 
   // Render states
   if (initError)    return <ErrorBanner message={initError} />;
