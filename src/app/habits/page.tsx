@@ -1,8 +1,7 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
+import { getSupabaseClient } from '@/lib/supabase/supabaseClient';
 import HabitForm from '@/components/habits/HabitForm';
 import HabitList from '@/components/habits/HabitList';
 import { Habit } from '@/types';

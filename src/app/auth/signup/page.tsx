@@ -1,9 +1,9 @@
 'use client';
-
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase/client'; // Ensure this path is correct
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { getSupabaseClient } from '@/lib/supabase/supabaseClient';
+
 
 export default function SignUp() {
   // State variables for form inputs, loading status, and error messages

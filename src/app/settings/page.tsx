@@ -1,10 +1,9 @@
 'use client';
-
 import { useEffect, useState, useCallback, ChangeEvent, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase/client';
-import type { User } from '@supabase/supabase-js';
+import { getSupabaseClient } from '@/lib/supabase/supabaseClient';
+import type { User } from '@/types';
 
 // Define the Profile type based on your schema including the new timezone field
 type Profile = {

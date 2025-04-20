@@ -1,11 +1,9 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase/client';
-import { startOfWeek, subDays, format } from 'date-fns'; // For date calculations
-// Import Recharts components
+import { getSupabaseClient } from '@/lib/supabase/supabaseClient';
+import { startOfWeek, subDays, format } from 'date-fns';
 import {
   LineChart,
   Line,

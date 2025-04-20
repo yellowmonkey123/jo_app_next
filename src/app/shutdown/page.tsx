@@ -1,24 +1,19 @@
 'use client';
-
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { ShutdownFormData, ShutdownStep } from '@/types';
 import { useDailyLogStore } from '@/stores/dailyLogStore';
 import { useInitializeSequence } from '@/lib/hooks/useInitializeSequence';
 import { getLocalDateString, stripUndefined } from '@/lib/utils/dateUtils';
-
-// Step components
+import { getSupabaseClient } from '@/lib/supabase/supabaseClient';
 import ConfirmDeferredStartupHabitsStep from '@/components/shutdown/ConfirmDeferredStartupHabitsStep';
 import DayRatingStep from '@/components/shutdown/DayRatingStep';
 import AccomplishmentStep from '@/components/shutdown/AccomplishmentStep';
 import ImprovementStep from '@/components/shutdown/ImprovementStep';
 import PmHabitsStep from '@/components/shutdown/PmHabitsStep';
-
-// Shared UI components
-import LoadingOverlay from '@/components/LoadingOverlay';
-import ErrorBanner from '@/components/ErrorBanner';
+import { LoadingOverlay } from '@/components/common/LoadingOverlay';
+import ErrorBanner from '@/components/common/ErrorBanner';
 
 // Sequence enum using existing ShutdownStep values
 enum ShutdownSequence {
