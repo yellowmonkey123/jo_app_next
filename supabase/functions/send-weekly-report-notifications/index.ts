@@ -1,65 +1,73 @@
-// supabase/functions/send-weekly-report-notifications/index.ts
-
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.4';
 import { corsHeaders } from '../_shared/cors.ts';
 
-// Define type for profile data we need (including timezone)
 interface UserProfile {
   id: string;
   phone: string;
-  timezone: string; // Added timezone
+  timezone: string;
 }
 
-// --- ADDED: Target day (0=Sun, 1=Mon, ..., 6=Sat) and hour for weekly reminders ---
-const TARGET_WEEKLY_DAY = 0; // Sunday
-const TARGET_WEEKLY_HOUR = 18; // 6 PM (18:00) local time
+interface DailyLogData {
+  weekly_report_reminder_sent_at: string | null;
+}
 
-console.log(`Starting send-weekly-report-notifications function (Target Local Day: ${TARGET_WEEKLY_DAY}, Target Local Hour: ${TARGET_WEEKLY_HOUR})...`);
+interface ResultDetail {
+  userId: string;
+  phone: string;
+  status: 'success' | 'failed' | 'skipped' | 'success_log_failed';
+  sid?: string;
+  error?: string | Record<string, any>;
+  reason?: string;
+}
 
+const TARGET_WEEKLY_REPORT_DAY = 0; // Sunday (0 = Sunday, 1 = Monday, etc.)
+const TARGET_WEEKLY_REPORT_HOUR = 9; // 9 AM (local time)
 
-// --- Helper Functions (Conceptual - use Intl API or a robust date library) ---
-// (Ensure these are the *same* implementations as in the other functions)
+console.log(`Starting send-weekly-report-notifications function (Target Local Day: Sunday, Hour: ${TARGET_WEEKLY_REPORT_HOUR})...`);
 
-// Calculates local hour (0-23)
-function calculateLocalHour(utcDate: Date, timezone: string): number | null {
-   try {
+function calculateLocalDayAndHour(utcDate: Date, timezone: string): { day: number; hour: number } | null {
+  try {
     const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone, hour: 'numeric', hourCycle: 'h23'
+      timeZone: timezone,
+      weekday: 'narrow',
+      hour: 'numeric',
+      hourCycle: 'h23',
     });
-    const hourString = formatter.format(utcDate);
-    const hour = parseInt(hourString, 10);
-    if (isNaN(hour) || hour < 0 || hour > 23) return null;
-    return hour;
-   } catch (e) {
-       console.error(`Failed to calculate local hour for timezone ${timezone}:`, e);
-       return null;
-   }
-}
+    const parts = formatter.formatToParts(utcDate);
+    const dayPart = parts.find(part => part.type === 'weekday');
+    const hourPart = parts.find(part => part.type === 'hour');
+    if (!dayPart || !hourPart) return null;
 
-// Calculates local day of the week (0=Sun, 6=Sat)
-function calculateLocalDayOfWeek(utcDate: Date, timezone: string): number | null {
-    try {
-        // 'en-US' locale uses Sunday as 0. Check locale if needed.
-        // weekday: 'numeric' might give 1-7 depending on locale, 'short'/'long' are safer if parsing names.
-        // Let's use toLocaleString with specific options for clarity.
-        const dateInTimezone = new Date(utcDate.toLocaleString('en-US', { timeZone: timezone }));
-        return dateInTimezone.getDay(); // 0 for Sunday, 1 for Monday, etc.
+    const dayMap: { [key: string]: number } = { 'S': 0, 'M': 1, 'T': 2, 'W': 3, 'T': 4, 'F': 5, 'S': 6 };
+    const day = dayMap[dayPart.value];
+    const hour = parseInt(hourPart.value, 10);
 
-        // Alternate Intl approach (might be less reliable depending on locale/runtime)
-        // const formatter = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'narrow' }); // e.g., 'S' for Sunday
-        // const dayInitial = formatter.format(utcDate);
-        // const dayMap = {'S': 0, 'M': 1, 'T': 2, 'W': 3, 'H': 4, 'F': 5, 'A': 6}; // Map based on 'narrow' output; fragile!
-        // return dayMap[dayInitial] ?? null;
-
-    } catch (e) {
-        console.error(`Failed to calculate local day of week for timezone ${timezone}:`, e);
-        return null;
+    if (day === undefined || isNaN(hour) || hour < 0 || hour > 23) {
+      console.error(`[User: ${timezone}] Invalid day ${day} or hour ${hour} calculated`);
+      return null;
     }
+    return { day, hour };
+  } catch (e) {
+    console.error(`[User: ${timezone}] Failed to calculate local day and hour:`, e);
+    return null;
+  }
 }
-// --- END Helper Functions ---
 
+function calculateLocalDateString(utcDate: Date, timezone: string): string | null {
+  try {
+    const formatter = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(utcDate);
+  } catch (e) {
+    console.error(`[User: ${timezone}] Failed to calculate local date string:`, e);
+    return null;
+  }
+}
 
-// --- Use Deno.serve ---
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     console.log('Handling OPTIONS request');
@@ -74,29 +82,27 @@ Deno.serve(async (req: Request) => {
     );
     console.log('Supabase admin client initialized.');
 
-    // --- Twilio Credentials ---
     const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
     const authToken = Deno.env.get('TWILIO_AUTH_TOKEN');
     const fromPhoneNumber = Deno.env.get('TWILIO_PHONE_NUMBER');
 
     if (!accountSid || !authToken || !fromPhoneNumber) {
-      console.error('Twilio credentials missing.');
+      console.error('Twilio credentials missing in environment variables.');
       throw new Error('Twilio credentials missing.');
     }
     console.log('Twilio credentials retrieved.');
 
-    // --- Get Current Time ---
     const nowUtc = new Date();
-    console.log(`Current UTC time: ${nowUtc.toISOString()}`);
+    const nowIsoString = nowUtc.toISOString();
+    console.log(`Current UTC time: ${nowIsoString}`);
 
-    // --- Query Profiles (MODIFIED) ---
     console.log('Querying profiles for users with SMS enabled, phone, and timezone...');
     const { data: potentialUsers, error: profilesError } = await supabaseAdmin
       .from('profiles')
-      .select('id, phone, timezone') // Select timezone
+      .select('id, phone, timezone')
       .eq('enable_sms_notifications', true)
       .not('phone', 'is', null)
-      .not('timezone', 'is', null); // Ensure timezone is set
+      .not('timezone', 'is', null);
 
     if (profilesError) {
       console.error('Error querying profiles:', profilesError);
@@ -104,76 +110,138 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!potentialUsers || potentialUsers.length === 0) {
-      console.log('No potential users found with SMS enabled, phone number, and timezone.');
+      console.log('No potential users found.');
       return new Response(JSON.stringify({ message: 'No potential users found.' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
       });
     }
     console.log(`Found ${potentialUsers.length} potential users.`);
 
-    // --- Filter Users by Local Day and Time (ADDED) ---
-    const eligibleUsers = potentialUsers.filter((user: UserProfile) => {
-      const localDay = calculateLocalDayOfWeek(nowUtc, user.timezone);
-      const localHour = calculateLocalHour(nowUtc, user.timezone);
-
-      if (localDay === null || localHour === null) {
-          console.log(`Skipping user ${user.id} due to invalid timezone or calculation error (${user.timezone}).`);
-          return false; // Skip if calculation failed
-      }
-
-      // Check if it's the target local day AND target local hour
-      const isTimeToSend = localDay === TARGET_WEEKLY_DAY && localHour === TARGET_WEEKLY_HOUR;
-      if (isTimeToSend) {
-          console.log(`User ${user.id} in timezone ${user.timezone} is eligible for weekly report. Local Day: ${localDay}, Local Hour: ${localHour}`);
-      }
-      return isTimeToSend;
+    const timeEligibleUsers = potentialUsers.filter((user: UserProfile) => {
+      const localInfo = calculateLocalDayAndHour(nowUtc, user.timezone);
+      if (!localInfo) return false;
+      return localInfo.day === TARGET_WEEKLY_REPORT_DAY && localInfo.hour === TARGET_WEEKLY_REPORT_HOUR;
     });
 
-    console.log(`Found ${eligibleUsers.length} users eligible for weekly report notification based on local time.`);
+    console.log(`Found ${timeEligibleUsers.length} users eligible based on local time (Day: Sunday, Hour: ${TARGET_WEEKLY_REPORT_HOUR}:00).`);
 
-    if (eligibleUsers.length === 0) {
-      return new Response(JSON.stringify({ message: 'No users in the target local time zone day/hour right now.' }), {
+    if (timeEligibleUsers.length === 0) {
+      return new Response(JSON.stringify({ message: 'No users in the target local time zone hour right now.' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
       });
     }
 
-    // --- Send SMS to Time-Eligible Users ---
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
-    const headers = {
+    const twilioHeaders = {
       'Authorization': `Basic ${btoa(`${accountSid}:${authToken}`)}`,
       'Content-Type': 'application/x-www-form-urlencoded',
     };
 
-    const results = [];
-    const reportUrl = `${Deno.env.get('NEXT_PUBLIC_SITE_URL') || 'http://localhost:3000'}/weekly-report`; // Get base URL
+    const results: ResultDetail[] = [];
 
-    for (const user of eligibleUsers) { // No need to cast if filter worked correctly
-      const messageBody = `📊 Your Jo App weekly report is ready! See your progress and insights here: ${reportUrl}`;
-      const body = new URLSearchParams({ To: user.phone, From: fromPhoneNumber, Body: messageBody });
+    for (const user of timeEligibleUsers) {
+      const userId = user.id;
 
-      console.log(`Attempting to send weekly report SMS to user ${user.id} at ${user.phone} (Local Time: Day ${TARGET_WEEKLY_DAY}, Hour ${TARGET_WEEKLY_HOUR})`);
+      const localDateString = calculateLocalDateString(nowUtc, user.timezone);
+      if (!localDateString) {
+        console.log(`[User: ${userId}] Skipping due to invalid local date calculation.`);
+        results.push({ userId: userId, phone: user.phone, status: 'skipped', reason: 'Date calculation error' });
+        continue;
+      }
+
+      console.log(`[User: ${userId}] Checking daily log for date ${localDateString}...`);
       try {
-        const response = await fetch(twilioUrl, { method: 'POST', headers: headers, body: body.toString() });
+        const { data: logData, error: logError } = await supabaseAdmin
+          .from('daily_logs')
+          .select('weekly_report_reminder_sent_at')
+          .eq('user_id', userId)
+          .eq('log_date', localDateString)
+          .maybeSingle();
+
+        if (logError) {
+          console.error(`[User: ${userId}] Error fetching daily log for ${localDateString}:`, logError.message);
+          results.push({ userId: userId, phone: user.phone, status: 'skipped', reason: `Error fetching daily log: ${logError.message}` });
+          continue;
+        }
+
+        if (logData && logData.weekly_report_reminder_sent_at) {
+          console.log(`[User: ${userId}] Weekly report reminder already sent on ${localDateString}. Skipping.`);
+          results.push({ userId: userId, phone: user.phone, status: 'skipped', reason: 'Already sent' });
+          continue;
+        }
+        console.log(`[User: ${userId}] Reminder not sent yet for ${localDateString}. Proceeding.`);
+      } catch (e) {
+        console.error(`[User: ${userId}] Unexpected error during daily log check:`, e);
+        results.push({ userId: userId, phone: user.phone, status: 'skipped', reason: `Log check exception: ${e.message}` });
+        continue;
+      }
+
+      const messageBody = `📊 Your Jo App weekly report is ready! Check your progress at: https://your-app-url/weekly-report`;
+      const requestBody = new URLSearchParams({ To: user.phone, From: fromPhoneNumber, Body: messageBody });
+
+      console.log(`[User: ${userId}] Attempting to send weekly report SMS to ${user.phone}...`);
+      let smsSentSuccessfully = false;
+      try {
+        const response = await fetch(twilioUrl, { method: 'POST', headers: twilioHeaders, body: requestBody.toString() });
         const responseData = await response.json();
+
         if (!response.ok) {
-          console.error(`Twilio error for user ${user.id}: Status ${response.status}`, responseData);
-          results.push({ userId: user.id, phone: user.phone, status: 'failed', error: responseData });
+          console.error(`[User: ${userId}] Twilio API error: Status ${response.status}`, responseData);
+          results.push({ userId: userId, phone: user.phone, status: 'failed', error: responseData });
         } else {
-          console.log(`Weekly report SMS sent successfully to user ${user.id}. SID: ${responseData.sid}`);
-          results.push({ userId: user.id, phone: user.phone, status: 'success', sid: responseData.sid });
+          console.log(`[User: ${userId}] Weekly report SMS sent successfully. SID: ${responseData.sid}`);
+          results.push({ userId: userId, phone: user.phone, status: 'success', sid: responseData.sid });
+          smsSentSuccessfully = true;
         }
       } catch (fetchError: unknown) {
-        console.error(`Network/Fetch error sending weekly report SMS to user ${user.id}:`, fetchError);
-        results.push({ userId: user.id, phone: user.phone, status: 'failed', error: fetchError instanceof Error ? fetchError.message : 'Unknown fetch error' });
+        const errorMessage = fetchError instanceof Error ? fetchError.message : 'Unknown fetch error';
+        console.error(`[User: ${userId}] Network/Fetch error sending SMS:`, fetchError);
+        results.push({ userId: userId, phone: user.phone, status: 'failed', error: errorMessage });
       }
-      await new Promise(resolve => setTimeout(resolve, 250)); // Optional delay
+
+      if (smsSentSuccessfully) {
+        console.log(`[User: ${userId}] Updating daily_log for ${localDateString} to mark reminder sent...`);
+        try {
+          const { error: upsertError } = await supabaseAdmin
+            .from('daily_logs')
+            .upsert(
+              {
+                user_id: userId,
+                log_date: localDateString,
+                weekly_report_reminder_sent_at: nowIsoString
+              },
+              {
+                onConflict: 'user_id, log_date',
+              }
+            );
+
+          if (upsertError) {
+            console.error(`[User: ${userId}] Error upserting daily_log for ${localDateString}:`, upsertError.message);
+            const resultIndex = results.findIndex(r => r.userId === userId && r.status === 'success');
+            if (resultIndex !== -1) {
+              results[resultIndex].status = 'success_log_failed';
+              results[resultIndex].error = `Upsert failed: ${upsertError.message}`;
+            }
+          } else {
+            console.log(`[User: ${userId}] Successfully updated daily_log for ${localDateString}.`);
+          }
+        } catch (e) {
+          console.error(`[User: ${userId}] Unexpected error during daily_log upsert:`, e);
+          const resultIndex = results.findIndex(r => r.userId === userId && r.status === 'success');
+          if (resultIndex !== -1) {
+            results[resultIndex].status = 'success_log_failed';
+            results[resultIndex].error = `Upsert exception: ${e.message}`;
+          }
+        }
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 250));
     }
 
     console.log('Finished processing weekly report notifications.');
     return new Response(JSON.stringify({ message: 'Weekly report notifications processed.', results }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
     });
-
   } catch (error: unknown) {
     console.error('Unhandled error in weekly report function:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
