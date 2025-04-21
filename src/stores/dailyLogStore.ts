@@ -24,11 +24,13 @@ export const useDailyLogStore = create<DailyLogState>((set, get) => ({
   fetchLogs: async (userId: string, timezone: string) => {
     set({ loading: true, error: null });
     try {
+      console.log('DailyLogStore: fetchLogs called with userId:', userId, 'timezone:', timezone);
+
       const now = new Date();
-      const todayDateStr = getLocalDateString(now, timezone);
+      const todayDateStr = getLocalDateString(timezone); // Fixed: Pass only timezone
       const yesterday = new Date(now);
       yesterday.setDate(now.getDate() - 1);
-      const yesterdayDateStr = getLocalDateString(yesterday, timezone);
+      const yesterdayDateStr = getLocalDateString(timezone); // Fixed: Pass only timezone
 
       if (!todayDateStr || !yesterdayDateStr) {
         console.error("Failed to calculate necessary local date strings.", { todayDateStr, yesterdayDateStr });

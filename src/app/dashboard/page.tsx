@@ -1,151 +1,204 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
-// import type { User } from '@supabase/supabase-js'; // Assuming User type isn't needed directly here now
-import { DailyLog } from '@/types'; // Make sure DailyLog type matches the function's return structure
+// src/app/dashboard/page.tsx
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
+// Assuming DailyLog type is correctly defined
+import type { DailyLog } from '@/types';
+// Import the server-side Supabase client function
+import { getServerSupabase } from '@/lib/supabase/serverClient';
 
-export default function Dashboard() {
-  const router = useRouter();
-  const [todayLog, setTodayLog] = useState<DailyLog | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null); // Added basic error state for feedback
+// --- Helper Functions (defined outside component for clarity) ---
 
-  useEffect(() => {
-    const checkAuthAndFetchLog = async () => {
-      setLoading(true);
-      setError(null); // Reset error on fetch
-      setTodayLog(null); // Reset log state
+/**
+ * Fetches the current user session using the server-side Supabase client.
+ * Encapsulates the client creation.
+ * @returns {Promise<{data: {session: import('@supabase/supabase-js').Session | null}, error: import('@supabase/supabase-js').AuthError | null}>} Session data and error object.
+ * @throws Error if Supabase client fails to initialize.
+ */
+async function getSessionData() {
+  // Create client *inside* the async function
+  const supabase = getServerSupabase();
+  // Add null check for robustness, although usually safe in Server Component context if env vars are set
+  if (!supabase) {
+      console.error("Dashboard Helper (getSessionData): Failed to initialize Supabase client.");
+      throw new Error("Database connection failed.");
+  }
+  // Fetch session
+  const { data, error } = await supabase.auth.getSession();
+  // Return both data and error for handling in the component
+  return { data, error };
+}
 
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+/**
+ * Fetches today's daily log for a given user using an RPC call.
+ * Encapsulates the client creation.
+ * @param userId The ID of the user whose log to fetch.
+ * @returns {Promise<{data: DailyLog | null, error: import('@supabase/supabase-js').PostgrestError | null}>} Log data and error object.
+ * @throws Error if Supabase client fails to initialize or if invalid data is received.
+ */
+async function getLogData(userId: string): Promise<{data: DailyLog | null, error: import('@supabase/supabase-js').PostgrestError | null}> {
+   // Create client *inside* the async function
+   const supabase = getServerSupabase();
+   if (!supabase) {
+       console.error("Dashboard Helper (getLogData): Failed to initialize Supabase client.");
+       throw new Error("Database connection failed.");
+   }
+   // Perform the RPC call
+   // Note: Ensure the 'get_today_log_for_user' function exists and works correctly in your database.
+   const { data: todayLogData, error } = await supabase
+    .rpc('get_today_log_for_user', { p_user_id: userId }) // Pass user ID to RPC
+    .maybeSingle(); // Expect 0 or 1 row
 
+   // Handle potential RPC errors during fetch
+   if (error) {
+       console.error("Dashboard Helper (getLogData): Error fetching today's log via RPC:", error);
+       // Return error to be handled by the component
+       return { data: null, error };
+   }
+
+   // Basic validation in case RPC returns unexpected non-object data (though maybeSingle helps)
+   if (todayLogData && typeof todayLogData !== 'object') {
+       console.error("Dashboard Helper (getLogData): Invalid log data received from RPC:", todayLogData);
+       // Throw an error or handle appropriately
+       throw new Error('Invalid log data received from database function.');
+   }
+
+   // Return data (casted) and null error
+   return { data: todayLogData as DailyLog | null, error: null };
+}
+
+// --- Async Server Component ---
+
+export default async function DashboardPage() {
+  console.log("DashboardPage: Rendering component...");
+
+  let session = null;
+  let sessionError = null;
+  let log: DailyLog | null = null;
+  let rpcError = null;
+
+  try {
+      // Call the helper function to get session data
+      const sessionResult = await getSessionData();
+      session = sessionResult.data.session;
+      sessionError = sessionResult.error;
+
+      // Redirect if no session or error fetching session
       if (sessionError || !session) {
-        console.error("Session error or no session:", sessionError);
-        // No need to set loading false here, redirect will happen
-        router.push('/auth/signin');
-        return;
+        console.error("Dashboard: No session found or error fetching session. Redirecting.", sessionError);
+        return redirect('/auth/signin');
       }
+      console.log("Dashboard: Session found for user:", session.user.id);
 
-      try {
-        console.log("Dashboard: Calling get_today_log_for_user for user:", session.user.id);
-        // --- MODIFIED: Call the RPC function instead of querying the table ---
-        const { data, error: rpcError } = await supabase
-            .rpc('get_today_log_for_user', { p_user_id: session.user.id }) // Pass the user ID parameter
-            .maybeSingle(); // Expecting one or zero rows matching the DailyLog type
+      // Fetch log data using the session user ID via the helper function
+      const logResult = await getLogData(session.user.id);
+      log = logResult.data;
+      rpcError = logResult.error; // Assign RPC error if one occurred
 
-        if (rpcError) {
-          // Throw the error to be caught by the catch block
-          throw rpcError;
-        }
+      console.log("Dashboard: Log data fetched:", log ? `Log ID ${log.id}` : "No log found", "RPC Error:", rpcError);
 
-        console.log("Dashboard: RPC call successful, data:", data);
-        if (data) {
-          // Make sure the structure returned by the function matches DailyLog type
-          setTodayLog(data as DailyLog);
-        } else {
-          setTodayLog(null); // Explicitly set to null if no log found for today
-        }
-      // --- END MODIFIED ---
-
-      } catch (err: unknown) {
-          console.error("Error fetching today's log via RPC:", err);
-          // Set an error message for the user
-          setError(err instanceof Error ? err.message : "Failed to load today's progress.");
-          setTodayLog(null); // Ensure log is null on error
-      } finally {
-          setLoading(false); // Ensure loading is set to false in all cases (success or error)
-      }
-    };
-
-    checkAuthAndFetchLog();
-  }, [router]); // Dependency array includes router
-
-  // --- Loading State ---
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-         <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-      </div>
-    );
+  } catch (error) {
+      // Catch errors from helper functions (e.g., client init failure)
+      console.error("Dashboard: Critical error during data fetching:", error);
+      // Render an error state or redirect
+      // For simplicity, showing a generic error message here
+      return (
+           <div className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8">
+              <h1 className="text-3xl font-bold mb-6">Welcome to Jo</h1>
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6" role="alert">
+                  <strong className="font-bold">Error:</strong>
+                  <span className="ml-2">{error instanceof Error ? error.message : "Failed to load dashboard data."}</span>
+              </div>
+           </div>
+      );
   }
 
-  // --- Main Content Render ---
+
+  // --- Render Logic (using fetched data) ---
   return (
-    <div className="max-w-4xl mx-auto p-4">
+    <div className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8">
       <h1 className="text-3xl font-bold mb-6">Welcome to Jo</h1>
 
-      {/* --- ADDED: Display error message if fetching failed --- */}
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-6" role="alert">
-            <strong className="font-bold">Error: </strong>
-            <span className="block sm:inline">{error}</span>
+      {/* Display RPC Error if it occurred during log fetch */}
+      {rpcError && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6" role="alert">
+          <strong className="font-bold">Error:</strong>
+          {/* Provide a user-friendly message */}
+          <span className="ml-2">{rpcError.message || "Failed to load today's progress."}</span>
         </div>
       )}
-      {/* --- END ADDED --- */}
 
-
+      {/* Today's Progress Section */}
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <h2 className="text-xl font-semibold mb-4">Today&apos;s Progress</h2>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Morning Startup section (Logic remains the same, depends on todayLog state) */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="font-medium mb-2">Morning Startup</h3>
-            {todayLog?.startup_completed_at ? (
-              <div className="text-green-600 flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+
+          {/* Morning Startup Card */}
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <h3 className="font-medium mb-2 text-gray-800">Morning Startup</h3>
+            {log?.startup_completed_at ? (
+              // Display completed status
+              <div className="text-green-600 flex items-center text-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
                 Completed
               </div>
             ) : (
+              // Display link to start
               <Link
                 href="/startup"
-                className="inline-block bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition"
+                className="inline-block bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm font-medium transition-colors"
               >
                 Begin Startup
               </Link>
             )}
           </div>
 
-          {/* Evening Shutdown section (Logic remains the same, depends on todayLog state) */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="font-medium mb-2">Evening Shutdown</h3>
-            {todayLog?.shutdown_completed_at ? (
-              <div className="text-green-600 flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+          {/* Evening Shutdown Card */}
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <h3 className="font-medium mb-2 text-gray-800">Evening Shutdown</h3>
+            {log?.shutdown_completed_at ? (
+              // Display completed status
+              <div className="text-green-600 flex items-center text-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
                 Completed
               </div>
-            ) : todayLog?.startup_completed_at ? (
+            ) : log?.startup_completed_at ? (
+              // Display link to start (only if startup is done)
               <Link
                 href="/shutdown"
-                className="inline-block bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition"
+                className="inline-block bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm font-medium transition-colors"
               >
                 Begin Shutdown
               </Link>
             ) : (
-              <span className="text-gray-500">
-                Complete startup first
-              </span>
+              // Display message if startup isn't done
+              <span className="text-gray-500 text-sm italic">Complete startup first</span>
             )}
           </div>
         </div>
       </div>
 
-      {/* Bottom links section (Unchanged) */}
+      {/* Bottom Links Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Link href="/habits" className="bg-white shadow rounded-lg p-6 hover:shadow-md transition">
-          <h2 className="text-xl font-semibold mb-2">Manage Habits</h2>
-          <p className="text-gray-600">Create, edit and organize your daily habits</p>
+        {/* Manage Habits Link */}
+        <Link
+          href="/habits"
+          className="block bg-white shadow rounded-lg p-6 hover:shadow-lg hover:border-indigo-100 border border-transparent transition duration-150 ease-in-out"
+        >
+          <h2 className="text-xl font-semibold mb-2 text-gray-800">Manage Habits</h2>
+          <p className="text-gray-600 text-sm">Create, edit, and organize your daily habits.</p>
         </Link>
 
-        <Link href="/weekly-report" className="bg-white shadow rounded-lg p-6 hover:shadow-md transition">
-          <h2 className="text-xl font-semibold mb-2">Weekly Report</h2>
-          <p className="text-gray-600">Review your progress and insights</p>
+        {/* Weekly Report Link */}
+        <Link
+          href="/weekly-report"
+          className="block bg-white shadow rounded-lg p-6 hover:shadow-lg hover:border-indigo-100 border border-transparent transition duration-150 ease-in-out"
+        >
+          <h2 className="text-xl font-semibold mb-2 text-gray-800">Weekly Report</h2>
+          <p className="text-gray-600 text-sm">Review your progress and insights from the past week.</p>
         </Link>
       </div>
     </div>

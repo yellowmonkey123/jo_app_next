@@ -1,52 +1,19 @@
-/* Reverted back to @import "tailwindcss"; as @tailwind directives caused issues */
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* Keep CSS variable definitions for potential use, but don't apply them directly to body background/color here */
 :root {
-  /* Default light theme variables (can be used by components) */
-  --background: 243 244 246; /* Equivalent of gray-100 */
-  --foreground: 17 24 39;   /* Equivalent of gray-900 */
-
-  /* You can define other theme variables here, e.g., for primary colors */
+  --background: 243 244 246;
+  --foreground: 17 24 39;
   --card: 255 255 255;
   --card-foreground: 17 24 39;
-  /* ... etc ... */
 }
 
-/* Define dark mode variable overrides (can be used by components) */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: 10 10 10;    /* Near black */
-    --foreground: 237 237 237; /* Light gray */
-
-    /* Define dark versions of other variables */
-    --card: 20 20 20; /* Example dark card */
+    --background: 10 10 10;
+    --foreground: 237 237 237; 
+    --card: 20 20 20;
     --card-foreground: 237 237 237;
-     /* ... etc ... */
   }
 }
-
-/*
-  Conflicting body styles remain removed.
-  The classes in layout.tsx should handle background, color, and font.
-*/
-/*
-body {
-  background: var(--background);  -- REMOVED
-  color: var(--foreground);      -- REMOVED
-  font-family: Arial, Helvetica, sans-serif; -- REMOVED
-}
-*/
-
-/* Non-standard @theme directive remains removed */
-/*
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-*/
-
-/* You can add other global styles below if needed */
-
