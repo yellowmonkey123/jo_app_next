@@ -10,9 +10,19 @@ interface DailyLogState {
   loading: boolean;
   error: string | null;
   fetchLogs: (userId: string, timezone: string) => Promise<void>;
-  markHabitDeferred: (habitId: string, sequenceType: 'startup' | 'shutdown') => Promise<void>;
-  unmarkHabitDeferred: (habitId: string, sequenceType: 'startup' | 'shutdown') => Promise<void>;
-  confirmDeferredHabit: (habitId: string, sequenceType: 'startup' | 'shutdown', didComplete: boolean) => void;
+  markHabitDeferred: (
+    habitId: string,
+    sequenceType: 'startup' | 'shutdown'
+  ) => Promise<void>;
+  unmarkHabitDeferred: (
+    habitId: string,
+    sequenceType: 'startup' | 'shutdown'
+  ) => Promise<void>;
+  confirmDeferredHabit: (
+    habitId: string,
+    sequenceType: 'startup' | 'shutdown',
+    didComplete: boolean
+  ) => Promise<void>;
 }
 
 export const useDailyLogStore = create<DailyLogState>((set, get) => ({
@@ -21,20 +31,17 @@ export const useDailyLogStore = create<DailyLogState>((set, get) => ({
   loading: false,
   error: null,
 
+  /* ──────────────────────────────────────────────────────────
+   * GET TODAY + YESTERDAY LOGS
+   * ────────────────────────────────────────────────────────*/
   fetchLogs: async (userId: string, timezone: string) => {
     set({ loading: true, error: null });
     try {
-      console.log('DailyLogStore: fetchLogs called with userId:', userId, 'timezone:', timezone);
-
-      const now = new Date();
-      const todayDateStr = getLocalDateString(timezone); // Fixed: Pass only timezone
-      const yesterday = new Date(now);
-      yesterday.setDate(now.getDate() - 1);
-      const yesterdayDateStr = getLocalDateString(timezone); // Fixed: Pass only timezone
+      const todayDateStr = getLocalDateString(timezone);
+      const yesterdayDateStr = getLocalDateString(timezone, { days: -1 });
 
       if (!todayDateStr || !yesterdayDateStr) {
-        console.error("Failed to calculate necessary local date strings.", { todayDateStr, yesterdayDateStr });
-        throw new Error("Failed to calculate local date strings.");
+        throw new Error('Failed to calculate local date strings');
       }
 
       const [todayData, yesterdayData] = await Promise.all([
@@ -42,132 +49,124 @@ export const useDailyLogStore = create<DailyLogState>((set, get) => ({
         getDailyLog(userId, yesterdayDateStr),
       ]);
 
+      set({ todayLog: todayData, yesterdayLog: yesterdayData, loading: false });
+    } catch (err) {
       set({
-        todayLog: todayData,
-        yesterdayLog: yesterdayData,
         loading: false,
-      });
-      console.log("Zustand Store: Logs fetched/updated.", { todayLog: todayData, yesterdayLog: yesterdayData });
-    } catch (error) {
-      console.error("Zustand Store: Error fetching logs:", error);
-      set({
-        error: error instanceof Error ? error.message : 'Failed to load daily logs.',
-        loading: false,
+        error: err instanceof Error ? err.message : 'Failed to load daily logs',
         todayLog: null,
         yesterdayLog: null,
       });
     }
   },
 
-  markHabitDeferred: async (habitId: string, sequenceType: 'startup' | 'shutdown') => {
-    const currentTodayLog = get().todayLog;
-    if (!currentTodayLog) {
-      console.error("Zustand Store: Cannot mark habit deferred, todayLog is null.");
-      return;
-    }
-    if (!currentTodayLog.id) {
-      console.error("Zustand Store: Cannot update deferred status: todayLog ID is missing.");
-      return;
+  /* ──────────────────────────────────────────────────────────
+   * MARK DEFERRED
+   * ────────────────────────────────────────────────────────*/
+  markHabitDeferred: async (habitId, sequenceType) => {
+    // Create a stub log if none exists yet so UI can still react
+    let todayLog = get().todayLog;
+    if (!todayLog) {
+      todayLog = {
+        id: undefined,
+        deferred_from_startup: [],
+        deferred_from_shutdown: [],
+      } as unknown as DailyLog;
     }
 
-    const updatedDeferredStartup = [...(currentTodayLog.deferred_from_startup || [])];
-    const updatedDeferredShutdown = [...(currentTodayLog.deferred_from_shutdown || [])];
+    const updatedStartup = [...(todayLog.deferred_from_startup ?? [])];
+    const updatedShutdown = [...(todayLog.deferred_from_shutdown ?? [])];
+
     let needsUpdate = false;
-
-    if (sequenceType === 'startup' && !updatedDeferredStartup.includes(habitId)) {
-      updatedDeferredStartup.push(habitId);
-      needsUpdate = true;
-    } else if (sequenceType === 'shutdown' && !updatedDeferredShutdown.includes(habitId)) {
-      updatedDeferredShutdown.push(habitId);
+    if (sequenceType === 'startup' && !updatedStartup.includes(habitId)) {
+      updatedStartup.push(habitId);
       needsUpdate = true;
     }
-
-    if (!needsUpdate) {
-      console.warn(`Zustand Store: Habit ${habitId} already marked as deferred for ${sequenceType} or invalid sequence type.`);
-      return;
+    if (sequenceType === 'shutdown' && !updatedShutdown.includes(habitId)) {
+      updatedShutdown.push(habitId);
+      needsUpdate = true;
     }
+    if (!needsUpdate) return;
 
-    const updatedTodayLog = {
-      ...currentTodayLog,
-      deferred_from_startup: updatedDeferredStartup,
-      deferred_from_shutdown: updatedDeferredShutdown,
-    };
-    set({ todayLog: updatedTodayLog });
-    console.log(`Zustand Store: Optimistically marked habit ${habitId} as deferred from ${sequenceType}.`);
+    // optimistic update
+    set({
+      todayLog: {
+        ...todayLog,
+        deferred_from_startup: updatedStartup,
+        deferred_from_shutdown: updatedShutdown,
+      },
+    });
+
+    // If the row doesn't exist yet (e.g. before Startup submit) skip DB write
+    if (!todayLog.id) return;
 
     try {
-      await updateDailyLogDeferred(currentTodayLog.id, updatedDeferredStartup, updatedDeferredShutdown);
-      console.log(`Zustand Store: DB update initiated for deferred habit ${habitId}.`);
-    } catch (dbError) {
-      console.error(`Zustand Store: Failed to save deferred habit ${habitId} to DB:`, dbError);
+      await updateDailyLogDeferred(todayLog.id, updatedStartup, updatedShutdown);
+    } catch (e) {
+      console.error('Failed to persist deferred habit', e);
     }
   },
 
-  unmarkHabitDeferred: async (habitId: string, sequenceType: 'startup' | 'shutdown') => {
-    const currentTodayLog = get().todayLog;
-    if (!currentTodayLog) {
-      console.error("Zustand Store: Cannot unmark habit deferred, todayLog is null.");
-      return;
-    }
-    if (!currentTodayLog.id) {
-      console.error("Zustand Store: Cannot update deferred status: todayLog ID is missing.");
-      return;
-    }
+  /* ──────────────────────────────────────────────────────────
+   * UN‑MARK DEFERRED
+   * ────────────────────────────────────────────────────────*/
+  unmarkHabitDeferred: async (habitId, sequenceType) => {
+    const cur = get().todayLog;
+    if (!cur || !cur.id) return;
 
-    let updatedDeferredStartup = [...(currentTodayLog.deferred_from_startup || [])];
-    let updatedDeferredShutdown = [...(currentTodayLog.deferred_from_shutdown || [])];
-    let needsUpdate = false;
-    let originalLength = 0;
+    const updatedStartup = cur.deferred_from_startup?.filter(id => id !== habitId) ?? [];
+    const updatedShutdown = cur.deferred_from_shutdown?.filter(id => id !== habitId) ?? [];
 
-    if (sequenceType === 'startup') {
-      originalLength = updatedDeferredStartup.length;
-      updatedDeferredStartup = updatedDeferredStartup.filter(id => id !== habitId);
-      if (updatedDeferredStartup.length !== originalLength) {
-        needsUpdate = true;
-      }
-    } else if (sequenceType === 'shutdown') {
-      originalLength = updatedDeferredShutdown.length;
-      updatedDeferredShutdown = updatedDeferredShutdown.filter(id => id !== habitId);
-      if (updatedDeferredShutdown.length !== originalLength) {
-        needsUpdate = true;
-      }
-    }
-
-    if (!needsUpdate) {
-      console.log(`Zustand Store: Habit ${habitId} was not in the deferred list for ${sequenceType}, no update needed.`);
-      return;
-    }
-
-    const updatedTodayLog = {
-      ...currentTodayLog,
-      deferred_from_startup: updatedDeferredStartup,
-      deferred_from_shutdown: updatedDeferredShutdown,
-    };
-    set({ todayLog: updatedTodayLog });
-    console.log(`Zustand Store: Optimistically unmarked habit ${habitId} as deferred from ${sequenceType}.`);
+    set({ todayLog: { ...cur, deferred_from_startup: updatedStartup, deferred_from_shutdown: updatedShutdown } });
 
     try {
-      await updateDailyLogDeferred(currentTodayLog.id, updatedDeferredStartup, updatedDeferredShutdown);
-      console.log(`Zustand Store: DB update initiated for unmarked deferred habit ${habitId}.`);
-    } catch (dbError) {
-      console.error(`Zustand Store: Failed to save unmarked deferred habit ${habitId} to DB:`, dbError);
+      await updateDailyLogDeferred(cur.id, updatedStartup, updatedShutdown);
+    } catch (e) {
+      console.error('Failed to persist un‑defer', e);
     }
   },
 
-  confirmDeferredHabit: (habitId: string, sequenceType: 'startup' | 'shutdown', didComplete: boolean) => {
-    console.log(`Zustand Store: Confirming deferred habit ${habitId} from ${sequenceType}. Did complete: ${didComplete}`);
+  /* ──────────────────────────────────────────────────────────
+   * CONFIRM DEFERRED HABIT DURING OTHER ROUTINE
+   * ────────────────────────────────────────────────────────*/
+  confirmDeferredHabit: async (habitId, sequenceType, didComplete) => {
     const { todayLog, yesterdayLog } = get();
 
-    if (sequenceType === 'startup' && todayLog?.deferred_from_startup?.includes(habitId)) {
-      const updatedDeferred = todayLog.deferred_from_startup.filter(id => id !== habitId);
-      set({ todayLog: { ...todayLog, deferred_from_startup: updatedDeferred } });
-      console.log(`Zustand Store: Removed ${habitId} from today's deferred_from_startup list locally.`);
-    } else if (sequenceType === 'shutdown' && yesterdayLog?.deferred_from_shutdown?.includes(habitId)) {
-      const updatedDeferred = yesterdayLog.deferred_from_shutdown.filter(id => id !== habitId);
-      set({ yesterdayLog: { ...yesterdayLog, deferred_from_shutdown: updatedDeferred } });
-      console.log(`Zustand Store: Removed ${habitId} from yesterday's deferred_from_shutdown list locally.`);
+    const isStartup = sequenceType === 'startup';
+    const log = isStartup ? todayLog : yesterdayLog;
+    if (!log || !log.id) return;
+
+    const deferredKey = isStartup ? 'deferred_from_startup' : 'deferred_from_shutdown';
+    const completedKey = isStartup ? 'completed_am_habits' : 'completed_pm_anytime_habits';
+
+    const newDeferred = (log[deferredKey] || []).filter(id => id !== habitId);
+    let newCompleted = log[completedKey] || [];
+
+    if (didComplete) {
+      if (!newCompleted.includes(habitId)) newCompleted = [...newCompleted, habitId];
     } else {
-      console.warn(`Zustand Store: Could not find habit ${habitId} in the expected deferred list for ${sequenceType} to confirm/remove.`);
+      newCompleted = newCompleted.filter(id => id !== habitId);
+    }
+
+    // optimistic update
+    set({
+      [isStartup ? 'todayLog' : 'yesterdayLog']: {
+        ...log,
+        [deferredKey]: newDeferred,
+        [completedKey]: newCompleted,
+      },
+    } as any);
+
+    try {
+      await updateDailyLogDeferred(
+        log.id,
+        isStartup ? newDeferred : (todayLog?.deferred_from_startup ?? []),
+        !isStartup ? newDeferred : (todayLog?.deferred_from_shutdown ?? []),
+        isStartup ? newCompleted : undefined,
+        !isStartup ? newCompleted : undefined
+      );
+    } catch (e) {
+      console.error('Failed to persist confirmDeferredHabit', e);
     }
   },
-}));
+}))

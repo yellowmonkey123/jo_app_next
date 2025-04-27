@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay'; // Added import for loading overlay
 import { getSupabaseClient } from '@/lib/supabase/supabaseClient';
-
+import { useEffect } from 'react';
 export default function SignUp() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,10 +14,19 @@ export default function SignUp() {
   const router = useRouter();
   const supabase = getSupabaseClient();
 
+  useEffect(() => {
+    setError(null);
+  }, []);
+
   const handleSignUp = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       setError(null);
+
+      if (!email || !password || !confirmPassword) {
+        setError('Please fill in all fields.');
+        return;
+      }
 
       // Password Match Validation
       if (password !== confirmPassword) {

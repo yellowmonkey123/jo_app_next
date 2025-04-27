@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import { getSupabaseClient } from '@/lib/supabase/supabaseClient';
+import { useEffect } from 'react';
 
 export default function SignInPage() {
   const router = useRouter();
@@ -14,6 +15,10 @@ export default function SignInPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setError(null);
+  }, []);
 
   const handleSignIn = useCallback(
     async (e: React.FormEvent) => {
@@ -36,12 +41,6 @@ export default function SignInPage() {
         console.log('Sign-in response:', { data, error: signInError });
         if (signInError) throw signInError;
         if (!data.session) throw new Error('No session returned after sign-in');
-
-        // Ensure session cookie is set
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        console.log('Session after sign-in:', { sessionData, sessionError });
-
-        if (sessionError || !sessionData.session) throw new Error('Failed to fetch session after sign-in');
 
         router.replace('/dashboard');
       } catch (err: unknown) {
