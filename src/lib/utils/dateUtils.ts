@@ -1,39 +1,57 @@
 // src/lib/utils/dateUtils.ts
+import { formatInTimeZone } from 'date-fns-tz';
+import { add, Duration } from 'date-fns'; // Import 'add' and 'Duration'
 
 /**
- * Gets the local date string (YYYY-MM-DD) for a given timezone.
- * Uses Intl API. Falls back to UTC date string on error.
+ * Gets the date string (YYYY-MM-DD) in the specified IANA timezone.
+ * Can optionally apply a date offset (e.g., { days: -1 } for yesterday).
+ * Uses date-fns-tz for robust timezone handling.
  *
  * @param timezone - The IANA timezone string (e.g., 'America/Los_Angeles').
- * @returns The date string in YYYY-MM-DD format.
+ * @param offset - Optional duration to add/subtract from the current date (e.g., { days: number }).
+ * @returns The formatted date string (YYYY-MM-DD) or null if timezone is invalid.
  */
-export function getLocalDateString(timezone: string): string {
-    try {
-        const date = new Date();
-        // 'en-CA' locale reliably gives YYYY-MM-DD format needed by date inputs/DB
-        const formatter = new Intl.DateTimeFormat('en-CA', {
-            timeZone: timezone,
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-        });
-        return formatter.format(date);
-    } catch (e) {
-        console.error(`Failed to format date for timezone ${timezone}:`, e);
-        // Fallback to UTC date string if timezone formatting fails
-        return new Date().toISOString().split('T')[0];
-    }
+export function getLocalDateString(
+  timezone: string,
+  offset?: Duration // Use the Duration type from date-fns
+): string | null {
+  try {
+    // Get the current date
+    const now = new Date();
+
+    // Apply the offset if provided
+    const targetDate = offset ? add(now, offset) : now;
+
+    // Format the target date in the specified timezone
+    // See: https://github.com/marnusw/date-fns-tz#formatintimezone
+    // See format options: https://date-fns.org/v3.6.0/docs/format
+    // Using 'yyyy-MM-dd' format which is compatible with databases and date inputs
+    const dateString = formatInTimeZone(targetDate, timezone, 'yyyy-MM-dd');
+    return dateString;
+  } catch (error) {
+    // Log error if timezone is invalid or another issue occurs
+    console.error(`Error getting local date string for timezone ${timezone}:`, error);
+    // Return null or handle the error as appropriate for your application
+    return null;
+  }
 }
 
-// Add other date-related utility functions here if needed in the future
-
+/**
+ * Removes properties with undefined values from an object.
+ * Useful for cleaning objects before database updates where undefined
+ * might cause issues or is unnecessary.
+ *
+ * @param obj - The object to strip undefined values from.
+ * @returns A new object with only defined values.
+ */
 export function stripUndefined<T extends object>(obj: T): Partial<T> {
-    const result: Partial<T> = {};
-    for (const [key, value] of Object.entries(obj) as [keyof T, T[keyof T]][]) {
-      if (value !== undefined) {
-        result[key] = value;
-      }
+  const result: Partial<T> = {};
+  // Iterate over object entries
+  for (const [key, value] of Object.entries(obj) as [keyof T, T[keyof T]][]) {
+    // Keep the property only if its value is not undefined
+    if (value !== undefined) {
+      result[key] = value;
     }
-    return result;
   }
-  
+  return result;
+}
