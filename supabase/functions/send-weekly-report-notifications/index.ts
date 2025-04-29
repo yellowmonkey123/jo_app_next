@@ -27,27 +27,38 @@ console.log(`Starting send-weekly-report-notifications function (Target Local Da
 
 function calculateLocalDayAndHour(utcDate: Date, timezone: string): { day: number; hour: number } | null {
   try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
+    // Use 'short' weekday format for better reliability
+    const formatter = new Intl.DateTimeFormat('en-US', { // Using 'en-US' locale for consistent short names
       timeZone: timezone,
-      weekday: 'narrow',
+      weekday: 'short', // CHANGED from 'narrow'
       hour: 'numeric',
       hourCycle: 'h23',
     });
     const parts = formatter.formatToParts(utcDate);
     const dayPart = parts.find(part => part.type === 'weekday');
     const hourPart = parts.find(part => part.type === 'hour');
-    if (!dayPart || !hourPart) return null;
 
-    const dayMap: { [key: string]: number } = { 'S': 0, 'M': 1, 'T': 2, 'W': 3, 'T': 4, 'F': 5, 'S': 6 };
-    const day = dayMap[dayPart.value];
+    if (!dayPart || !hourPart) {
+         console.error(`[User: ${timezone}] Could not extract day/hour parts from date.`);
+         return null;
+    }
+
+    // Map based on 'short' weekday names (more robust)
+    const dayMap: { [key: string]: number } = {
+         'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6
+    };
+    const day = dayMap[dayPart.value]; // Use the short name like 'Sun', 'Mon' etc.
     const hour = parseInt(hourPart.value, 10);
 
+    // Validate the parsed day and hour
     if (day === undefined || isNaN(hour) || hour < 0 || hour > 23) {
-      console.error(`[User: ${timezone}] Invalid day ${day} or hour ${hour} calculated`);
+      console.error(`[User: <span class="math-inline">\{timezone\}\] Invalid day part '</span>{dayPart.value}' (mapped to ${day}) or hour ${hour} calculated`);
       return null;
     }
+    // console.log(`[User: ${timezone}] Calculated local day: ${day}, hour: ${hour}`); // Optional: Add for debugging if needed
     return { day, hour };
   } catch (e) {
+    // Catch errors during timezone formatting (e.g., invalid timezone string)
     console.error(`[User: ${timezone}] Failed to calculate local day and hour:`, e);
     return null;
   }

@@ -26,6 +26,7 @@ Jo App is a personal well-being and habit-tracking application designed to help 
     4.  **Prioritize Learning:** Encourage questions and be prepared to elaborate or discuss alternatives.
     5.  **Update README:** At the end of each significant work session, collaboratively update the "Session Log / Handoff Section" below with a summary of changes, status, and next steps.
     6.  **Git Workflow:** Assume changes will be committed frequently using Git best practices (clear commit messages).
+    7. FINAL NOTES: Be short, but also concise. Don't leave anything out, but don't over pontificate. 
 
 ## 3. Tech Stack
 
@@ -64,7 +65,7 @@ Jo App is a personal well-being and habit-tracking application designed to help 
 │ │ ├── settings/ # User settings page
 │ │ ├── shutdown/ # Evening check-in sequence page
 │ │ ├── startup/ # Morning check-in sequence page
-│ │ ├── weekly-report/ # Weekly summary page
+│ │ ├── weekly-report/ # Weekly summary page (with week selector & report display)
 │ │ ├── globals.css # Global styles
 │ │ ├── layout.tsx # Root layout component
 │ │ └── page.tsx # Landing page component
@@ -138,7 +139,8 @@ npm run start: Starts the production server (requires npm run build first).
 npm run lint: Runs ESLint to check for code quality issues.#
 
 ## 8. Current Status (as of 2025-04-27)
-* Core MVP features implemented: Habit definition & tracking, AM/PM check-in sequences, basic weekly report display, user authentication (Supabase), settings page (profile info, notification opt-in).
+* Core MVP features implemented: Habit definition & tracking, AM/PM check-in sequences, basic weekly report display, user authentication (Supabase), settings page (profile info, notification opt-in).'
+*  Weekly Report page significantly enhanced: Features a dynamic week selector UI, calculates week statuses (unavailable, past, current, future), loads historical reports, and displays a pending state for the current week. Qualitative review section redesigned with card layout.
 * Build Stability: The application builds successfully with Next.js v14.2.4 after resolving previous dependency and type issues.
 * Backend: Supabase handles authentication, database storage, and edge functions (e.g., for reminders - confirm implementation status).
 * Codebase: Committed to the main branch. Refactored to use @supabase/ssr and @supabase/supabase-js.
@@ -188,3 +190,71 @@ Next Steps / Open Issues:
 Review and finalize this README.md.
 Proceed with Git workflow: review local changes, stage, commit, and push.
 Test the handoff process by starting
+
+
+---
+## Session Summary [2025-04-27]
+
+**Goal:** Enhance the Weekly Report page (`src/app/weekly-report/page.tsx`) by adding a week selection UI, calculating week statuses, and refining the layout.
+
+**Key Changes:**
+* Refactored data fetching to separate initial user/first log date fetch from specific report fetch.
+* Added state management for `user`, `firstLogDate`, `selectedWeekStartDate`, `yearWeeks`, `reportLoading`, `reportError`, `showPendingMessage`.
+* Implemented `useEffect` hooks to calculate week statuses (Unavailable, Future, Past Completed, Latest Completed, Current In-Progress) based on `firstLogDate` and current date.
+* Created a dynamic week selector UI displaying weeks of the current year as styled buttons based on their status.
+    * Latest completed week uses distinct styling (emerald green).
+    * Current week uses distinct styling (dashed yellow border).
+* Made the current week clickable, showing a "Report In Progress" placeholder instead of fetching data.
+* Updated report data fetching logic to trigger based on `selectedWeekStartDate` state.
+* Redesigned the "Qualitative Review" section using a 3-card layout and styled tags for better visual presentation.
+* Resolved TypeScript build error (`Type 'null' is not assignable to type 'Date'`) by adding explicit typing.
+* Fixed runtime `RangeError` caused by incorrect date format strings.
+
+**Current Application Status:** Weekly Report page now displays a functional week selector, loads data for the selected completed week, shows a pending state for the current week, and features an improved qualitative review layout. Build is stable.
+
+**Dependencies Added/Changed:** None.
+
+**Next Steps / Open Issues:**
+* Consider further UI/UX refinements for the week selector or report content if desired.
+* (Deferred) Implement user setting for weekly report availability time (Sunday/Monday).
+* (Deferred) Implement weekly cover photo upload/display feature.
+* (Deferred) Add year navigation to the weekly report selector.
+---
+
+
+---
+## Session Summary [2025-04-28]
+
+**Goal:** Resolve issues with non-functional Shutdown and Weekly Report SMS reminders. Add a new Midday reminder for "Anytime" habits.
+
+**Key Changes:**
+* **Diagnosed Invocation Failure:** Identified that `pg_cron` jobs were using the public `anon` key for authorization, preventing the `send-shutdown-reminders` and `send-weekly-report-notifications` functions from executing, despite the cron job run status showing 'succeeded'.
+* **Fixed Cron Job Authorization:** Updated the `cron.schedule` commands for all three reminder jobs (`startup`, `shutdown`, `weekly-report`) via SQL to use the `SERVICE_ROLE_KEY` in the `Authorization: Bearer` header. This resolved the invocation failures. (See `SQL Script to Update Cron Jobs`).
+* **Corrected Weekly Report Day Logic:** Fixed the `calculateLocalDayAndHour` function in `supabase/functions/send-weekly-report-notifications/index.ts` to use `'short'` weekday format instead of `'narrow'` to prevent potential day miscalculations. Deployed the fix using `supabase functions deploy`.
+* **Added Midday Reminder Column:** Added `midday_reminder_sent_at` (TIMESTAMPTZ, nullable) column to the `daily_logs` table via SQL.
+* **Created Midday Reminder Function:**
+    * Created new Edge Function `supabase/functions/send-midday-reminders/index.ts`.
+    * Logic fetches users eligible based on `TARGET_MIDDAY_HOUR = 12` (12 PM local time).
+    * Checks `daily_logs.midday_reminder_sent_at` to prevent duplicates.
+    * Fetches habits where `timing = 'Anytime'`.
+    * Constructs and sends an SMS listing the "Anytime" habits via Twilio.
+    * Updates `daily_logs.midday_reminder_sent_at` on successful send.
+* **Scheduled Midday Reminder:** Added a new `pg_cron` job (`invoke-midday-reminder`) scheduled to run every 15 minutes (`*/15 * * * *`) using the `SERVICE_ROLE_KEY`.
+* **Deployed Midday Reminder:** Deployed the new function using `supabase functions deploy send-midday-reminders --no-verify-jwt` after fixing initial syntax errors.
+* **Verified Invocations:** Confirmed via Supabase function logs that `send-shutdown-reminders` and `send-midday-reminders` are now being invoked correctly by their respective cron jobs.
+
+**Current Application Status:**
+* Startup, Shutdown, and Midday reminder functions are now being correctly invoked by their respective cron jobs every 15 minutes.
+* Shutdown reminder logic is confirmed to be running, awaiting the correct local time (8 PM) to send.
+* Weekly report reminder logic is corrected and deployed, awaiting Sunday to run.
+* Midday reminder function is deployed and invoking, awaiting the correct local time (12 PM) to send.
+
+**Dependencies Added/Changed:** None.
+
+**Next Steps / Open Issues:**
+* Monitor `send-midday-reminders` function logs and SMS delivery tomorrow (Tuesday) around 12 PM local time.
+* Monitor `send-shutdown-reminders` function logs and SMS delivery tonight/daily around 8 PM local time.
+* Monitor `send-weekly-report-notifications` function logs and SMS delivery this Sunday around 9 AM local time.
+* (Deferred) Implement user settings for customizing reminder times/days.
+* (Deferred) Review SMS message content for any desired changes (e.g., adding the app URL if needed).
+---
