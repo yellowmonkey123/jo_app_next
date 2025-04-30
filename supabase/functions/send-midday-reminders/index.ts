@@ -141,6 +141,8 @@ Deno.serve(async (req: Request) => {
     console.log(`Found ${timeEligibleUsers.length} users eligible based on local time hour (${TARGET_MIDDAY_HOUR}:00).`);
 
     if (timeEligibleUsers.length === 0) {
+      // This is expected if the function runs outside the target hour
+      console.log(`No users currently in the target local time zone hour (${TARGET_MIDDAY_HOUR}:00).`);
       return new Response(JSON.stringify({ message: `No users in the target local time zone hour (${TARGET_MIDDAY_HOUR}:00) right now.` }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
       });
@@ -199,14 +201,15 @@ Deno.serve(async (req: Request) => {
         continue; // Skip to the next user
       }
 
-      // 5. Fetch user's "Anytime" habits
-      console.log(`[User: ${userId}] Fetching 'Anytime' habits...`);
+      // 5. Fetch user's "Anytime" habits (CASE-INSENSITIVE)
+      console.log(`[User: ${userId}] Fetching 'Anytime' habits (case-insensitive)...`);
       // Corrected type assertion placement (after the entire await expression)
       const { data: anytimeHabits, error: habitsError } = (await supabaseAdmin
         .from('habits')
         .select('name') // Select only the name
         .eq('user_id', userId)
-        .eq('timing', 'Anytime') // Filter by the 'timing' column value
+        // Use ilike for case-insensitive matching
+        .ilike('timing', 'Anytime') // <<< CHANGED from .eq() to .ilike()
         .order('sort_order', { ascending: true })) as { data: Habit[] | null; error: any }; // Type assertion after await
 
       if (habitsError) {
@@ -215,15 +218,19 @@ Deno.serve(async (req: Request) => {
           continue; // Skip to the next user
       }
 
+      // Add extra logging to see what the query returned
+      console.log(`[User: ${userId}] Found ${anytimeHabits ? anytimeHabits.length : 0} habits matching ILIKE 'Anytime'.`);
+
       if (!anytimeHabits || anytimeHabits.length === 0) {
-          console.log(`[User: ${userId}] No 'Anytime' habits found. Skipping reminder.`);
-          results.push({ userId: userId, phone: user.phone, status: 'no_anytime_habits', reason: 'User has no habits marked as Anytime' });
+          console.log(`[User: ${userId}] No 'Anytime' habits found (using ilike). Skipping reminder.`);
+          results.push({ userId: userId, phone: user.phone, status: 'no_anytime_habits', reason: 'User has no habits matching ILIKE Anytime' });
           continue; // Skip to the next user
       }
 
       // 6. Construct the SMS message body
       const habitNames = anytimeHabits.map(h => h.name).join(', '); // Comma-separated list
       const messageBody = `🕛 Quick check-in! Remember your Jo App "Anytime" habits: ${habitNames}`;
+      console.log(`[User: ${userId}] Prepared message body: ${messageBody}`); // Log the message
 
       // 7. Send the SMS via Twilio
       const requestBody = new URLSearchParams({ To: user.phone, From: fromPhoneNumber, Body: messageBody });

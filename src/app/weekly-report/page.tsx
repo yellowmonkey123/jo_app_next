@@ -37,8 +37,8 @@ interface WeeklyReportData {
   startDate: string;
   endDate: string;
   completionSummary: {
-    startup: { completed: number; total: number; rate: number; daily: boolean[] };
-    shutdown: { completed: number; total: number; rate: number; daily: boolean[] };
+    startup: { completed: number; total: number; rate: number; daily: (boolean | null | undefined)[] }; // Allow null/undefined
+    shutdown: { completed: number; total: number; rate: number; daily: (boolean | null | undefined)[] }; // Allow null/undefined
   };
   habitConsistency: Array<{
     id: string;
@@ -47,7 +47,7 @@ interface WeeklyReportData {
     completed: number;
     total: number;
     rate: number;
-    daily: boolean[];
+    daily: (boolean | null | undefined)[]; // Allow null/undefined
   }>;
   ratingsTrend: Array<{
     date: string;
@@ -78,16 +78,6 @@ interface WeekInfo {
   startDate: Date;
   status: WeekStatus;
 }
-
-
-// Helper component for rendering daily status icons (check/cross)
-const StatusIcon = ({ completed }: { completed: boolean }) => {
-  return completed ? (
-    <span className="text-green-500" title="Completed">✓</span>
-  ) : (
-    <span className="text-red-500" title="Missed">✕</span>
-  );
-};
 
 // Constant for initial number of qualitative items to show before expanding
 const INITIAL_QUALITATIVE_LIMIT = 3;
@@ -170,20 +160,100 @@ export default function WeeklyReportPage() {
   // --- Effect 3: Calculate Week Statuses ---
   useEffect(() => {
     if (initialLoading || !user) return;
-    console.log("Calculating week statuses...");
-    const today = new Date(); const currentYear = today.getFullYear(); const yearStart = startOfYear(today); const firstWeekStart = firstLogDate ? startOfWeek(parseISO(firstLogDate), { weekStartsOn: 0 }) : null; const currentWeekStart = startOfWeek(today, { weekStartsOn: 0 }); const latestReportableWeekStart = today.getDay() === 0 ? subDays(currentWeekStart, 7) : startOfWeek(subDays(today, 7), { weekStartsOn: 0 });
-    const weeks: WeekInfo[] = [];
-    for (let i = 0; i < 53; i++) {
-      const weekStartDate = startOfWeek(addWeeks(yearStart, i), { weekStartsOn: 0 }); if (weekStartDate.getFullYear() > currentYear) break; if (weekStartDate.getFullYear() < currentYear && i > 0) continue;
-      const weekNumber = getWeek(weekStartDate, { weekStartsOn: 0 }); let status: WeekStatus;
-      if (firstWeekStart && isBefore(weekStartDate, firstWeekStart)) { status = WeekStatus.UNAVAILABLE; } else if (isSameDay(weekStartDate, currentWeekStart)) { status = WeekStatus.CURRENT_IN_PROGRESS; } else if (isAfter(weekStartDate, currentWeekStart)) { status = WeekStatus.FUTURE; } else if (isSameDay(weekStartDate, latestReportableWeekStart)) { status = (firstWeekStart && isBefore(weekStartDate, firstWeekStart)) ? WeekStatus.UNAVAILABLE : WeekStatus.LATEST_COMPLETED; } else if (isBefore(weekStartDate, latestReportableWeekStart)) { status = (firstWeekStart && isBefore(weekStartDate, firstWeekStart)) ? WeekStatus.UNAVAILABLE : WeekStatus.PAST_COMPLETED; } else { status = WeekStatus.FUTURE; }
-      if (!firstWeekStart && isBefore(weekStartDate, currentWeekStart)) { status = WeekStatus.UNAVAILABLE; }
-      weeks.push({ weekNumber, startDate: weekStartDate, status });
-    }
-    const uniqueWeeks = weeks.filter((week, index, self) => index === self.findIndex((w) => w.weekNumber === week.weekNumber && w.startDate.getFullYear() === currentYear));
-    setYearWeeks(uniqueWeeks);
-  }, [initialLoading, user, firstLogDate]);
+    console.log("Recalculating week statuses with refined logic...");
 
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const yearStart = startOfYear(today); // e.g., 2025-01-01
+
+    const firstLogDateObj = firstLogDate ? parseISO(firstLogDate) : null;
+    // Get the START of the week containing the first log date
+    const firstWeekStart = firstLogDateObj ? startOfWeek(firstLogDateObj, { weekStartsOn: 0 }) : null;
+
+    const currentWeekStart = startOfWeek(today, { weekStartsOn: 0 });
+    const latestReportableWeekStart = today.getDay() === 0
+        ? subDays(currentWeekStart, 7)
+        : startOfWeek(subDays(today, 7), { weekStartsOn: 0 });
+
+    const weeks: WeekInfo[] = [];
+    for (let i = 0; i < 53; i++) { // Loop up to 53 should be safe
+        // Calculate weekStartDate based directly on startOfYear + offset
+        const weekStartDate = startOfWeek(addWeeks(yearStart, i), { weekStartsOn: 0 });
+
+        // Stop if the week generated starts in the *next* year.
+        if (weekStartDate.getFullYear() > currentYear) {
+            break;
+        }
+        // Skip if week generation somehow produced a date in the previous year (for i > 0)
+        if (weekStartDate.getFullYear() < currentYear && i > 0) {
+             console.warn("Skipping unexpected week calculation:", weekStartDate);
+             continue;
+         }
+
+        const weekNumber = getWeek(weekStartDate, { weekStartsOn: 0 });
+
+        // --- Use the Refined Status Logic ---
+        let status: WeekStatus;
+        // 1. Unavailable: Before first log OR (no logs exist AND before current week)
+        if ((firstWeekStart && isBefore(weekStartDate, firstWeekStart)) || (!firstWeekStart && isBefore(weekStartDate, currentWeekStart))) {
+            status = WeekStatus.UNAVAILABLE;
+        }
+        // 2. Current In-Progress
+        else if (isSameDay(weekStartDate, currentWeekStart)) {
+            status = WeekStatus.CURRENT_IN_PROGRESS;
+        }
+        // 3. Future
+        else if (isAfter(weekStartDate, currentWeekStart)) {
+            status = WeekStatus.FUTURE;
+        }
+        // 4. Latest Completed (Must match latest reportable date and NOT be unavailable)
+        else if (isSameDay(weekStartDate, latestReportableWeekStart)) {
+             // Double check against firstWeekStart (Handles case where tracking starts *after* the 'latest completed' week)
+             if (firstWeekStart && isBefore(weekStartDate, firstWeekStart)) {
+                 status = WeekStatus.UNAVAILABLE;
+             } else {
+                 status = WeekStatus.LATEST_COMPLETED;
+             }
+        }
+        // 5. Past Completed (Any other week before current, not already marked Unavailable)
+        else if (isBefore(weekStartDate, currentWeekStart)) { // Should be safe as Unavailable is checked first
+             status = WeekStatus.PAST_COMPLETED;
+        }
+        // 6. Default Fallback (Safety)
+        else {
+            status = WeekStatus.FUTURE;
+        }
+        // --- End Refined Status Logic ---
+
+        weeks.push({ weekNumber, startDate: weekStartDate, status });
+    }
+
+    // Filter for unique weeks (allow Week 1 starting prev year) & Sort
+    const uniqueWeeks = weeks
+      .filter((week, index, self) => {
+          // Allow weeks starting in the current year, OR week 1 starting in the previous year.
+          const isInCurrentYear = week.startDate.getFullYear() === currentYear;
+          const isWeek1PrevYear = week.startDate.getFullYear() === currentYear - 1 && week.weekNumber === 1;
+
+          // Check for uniqueness based on week number AND the year it predominantly belongs to (current year)
+          return (isInCurrentYear || isWeek1PrevYear) &&
+                 index === self.findIndex((w) =>
+                     w.weekNumber === week.weekNumber && // Match week number
+                     (w.startDate.getFullYear() === currentYear || (w.startDate.getFullYear() === currentYear - 1 && w.weekNumber === 1)) // Match year context
+                 );
+      })
+      .sort((a, b) => {
+          // Sort primarily by year of start date, then week number
+           if (a.startDate.getFullYear() !== b.startDate.getFullYear()) {
+              return a.startDate.getFullYear() - b.startDate.getFullYear();
+          }
+          return a.weekNumber - b.weekNumber;
+      });
+
+    console.log("Final calculated weeks:", uniqueWeeks.map(w => ({ wn: w.weekNumber, sd: format(w.startDate, 'yyyy-MM-dd'), status: w.status })));
+    setYearWeeks(uniqueWeeks);
+
+  }, [initialLoading, user, firstLogDate]);
 
   // --- Effect 4: Fetch Report Data ---
   useEffect(() => {
@@ -199,6 +269,7 @@ export default function WeeklyReportPage() {
         const supabase = getSupabaseClient(); if (!supabase) throw new Error('Database connection failed.');
         const { data: rpcData, error: rpcError } = await supabase.rpc('get_weekly_report_data', { target_user_id: user.id, week_start_date: formattedStartDate });
         if (rpcError) throw rpcError;
+        // Ensure the daily arrays can handle null/undefined if the RPC returns them
         setReportData(rpcData as WeeklyReportData);
       } catch (err: unknown) { console.error('Error fetching report data:', err); setReportError(err instanceof Error ? err.message : 'Failed to load report data.');
       } finally { setReportLoading(false); }
@@ -252,7 +323,8 @@ export default function WeeklyReportPage() {
   // Prepare variables for rendering
   const daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const currentYearForTitle = yearWeeks[0]?.startDate.getFullYear() ?? new Date().getFullYear();
-  const nextSundayDate = selectedWeekStartDate && showPendingMessage ? format(addDays(endOfWeek(selectedWeekStartDate, { weekStartsOn: 0 }), 1), 'MMMM do') : '';
+  // --- FIX: Use 'MMMM d' format instead of 'MMMM do' ---
+  const nextSundayDate = selectedWeekStartDate && showPendingMessage ? format(addDays(endOfWeek(selectedWeekStartDate, { weekStartsOn: 0 }), 1), 'MMMM d') : '';
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-8 font-sans">
@@ -261,6 +333,7 @@ export default function WeeklyReportPage() {
            <div>
                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Weekly Report</h1>
                <p className="text-sm text-gray-500 mt-1">
+                   {/* --- FIX: Use yyyy instead of YYYY --- */}
                    {showPendingMessage ? `Report pending for week of ${format(selectedWeekStartDate!, 'MMM d, yyyy')}`
                    : reportLoading ? 'Loading report...'
                    : reportData ? `Showing data from ${format(parseISO(reportData.startDate), 'MMM d, yyyy')} to ${format(parseISO(reportData.endDate), 'MMM d, yyyy')}`
@@ -281,6 +354,7 @@ export default function WeeklyReportPage() {
                 ))}
             </div>
              <p className="text-xs text-center text-gray-500 mt-3">
+                {/* --- FIX: Use yyyy instead of YYYY --- */}
                 {firstLogDate ? `Tracking started: ${format(parseISO(firstLogDate), 'MMM d, yyyy')}` : 'No activity logged yet.'}
              </p>
         </div>
@@ -294,62 +368,137 @@ export default function WeeklyReportPage() {
       : (
         // --- Report Sections ---
         <>
-          {/* Completion Summary */}
+          {/* === Completion Summary === */}
           <div className="bg-white shadow-md rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4 text-gray-800">Completion Summary</h2>
               <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
+                  {/* --- Use border-collapse --- */}
+                  <table className="min-w-full divide-y divide-gray-200 border-collapse table-fixed">
+                      <colgroup>
+                          {/* Define column widths */}
+                          <col style={{ width: '25%' }} /> {/* Routine column */}
+                          <col style={{ width: '8%' }} />  {/* Sun */}
+                          <col style={{ width: '8%' }} />  {/* Mon */}
+                          <col style={{ width: '8%' }} />  {/* Tue */}
+                          <col style={{ width: '8%' }} />  {/* Wed */}
+                          <col style={{ width: '8%' }} />  {/* Thu */}
+                          <col style={{ width: '8%' }} />  {/* Fri */}
+                          <col style={{ width: '8%' }} />  {/* Sat */}
+                          <col style={{ width: '19%' }} /> {/* Weekly Rate column */}
+                      </colgroup>
                       <thead className="bg-gray-50">
                           <tr>
-                              <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">Routine</th>
-                              {daysOfWeek.map(day => <th key={day} scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">{day}</th>)}
-                              <th scope="col" className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Weekly Rate</th>
+                              {/* No width needed here, defined in colgroup */}
+                              <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Routine</th>
+                              {daysOfWeek.map(day => <th key={day} scope="col" className="px-0 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">{day}</th>)}
+                              <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Weekly Rate</th>
                           </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
+                          {/* Startup Row */}
                           <tr>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">Startup</td>
-                              {reportData.completionSummary.startup.daily.map((status, index) => <td key={index} className="px-3 py-4 text-center text-sm"><StatusIcon completed={status} /></td>)}
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500 text-right font-medium">{reportData.completionSummary.startup.rate}% ({reportData.completionSummary.startup.completed}/{reportData.completionSummary.startup.total})</td>
+                              <td className="px-2 py-2 whitespace-nowrap text-sm font-medium text-gray-900 border border-gray-200">Startup</td>
+                              {reportData.completionSummary.startup.daily.map((status, index) => (
+                                  <td
+                                      key={index}
+                                      className={`
+                                          h-6 align-middle overflow-hidden border border-white // Add white border, remove padding
+                                          ${ // Color Logic
+                                              status === true ? 'bg-green-200'
+                                              : status === false ? 'bg-red-200'
+                                              : 'bg-gray-100'
+                                          }
+                                      `}
+                                      title={status === true ? 'Completed' : status === false ? 'Missed' : 'N/A'}
+                                  >
+                                      <div className="h-full w-full"></div>
+                                  </td>
+                              ))}
+                              <td className="px-2 py-2 whitespace-nowrap text-sm text-gray-500 text-right font-medium border border-gray-200">{reportData.completionSummary.startup.rate}% ({reportData.completionSummary.startup.completed}/{reportData.completionSummary.startup.total})</td>
                           </tr>
+                          {/* Shutdown Row */}
                           <tr>
-                              <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">Shutdown</td>
-                              {reportData.completionSummary.shutdown.daily.map((status, index) => <td key={index} className="px-3 py-4 text-center text-sm"><StatusIcon completed={status} /></td>)}
-                              <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500 text-right font-medium">{reportData.completionSummary.shutdown.rate}% ({reportData.completionSummary.shutdown.completed}/{reportData.completionSummary.shutdown.total})</td>
+                              <td className="px-2 py-2 whitespace-nowrap text-sm font-medium text-gray-900 border border-gray-200">Shutdown</td>
+                              {reportData.completionSummary.shutdown.daily.map((status, index) => (
+                                  <td
+                                      key={index}
+                                      className={`
+                                          h-6 align-middle overflow-hidden border border-white // Add white border, remove padding
+                                          ${ // Color Logic
+                                              status === true ? 'bg-green-200'
+                                              : status === false ? 'bg-red-200'
+                                              : 'bg-gray-100'
+                                          }
+                                      `}
+                                      title={status === true ? 'Completed' : status === false ? 'Missed' : 'N/A'}
+                                  >
+                                      <div className="h-full w-full"></div>
+                                  </td>
+                              ))}
+                              <td className="px-2 py-2 whitespace-nowrap text-sm text-gray-500 text-right font-medium border border-gray-200">{reportData.completionSummary.shutdown.rate}% ({reportData.completionSummary.shutdown.completed}/{reportData.completionSummary.shutdown.total})</td>
                           </tr>
                       </tbody>
                   </table>
               </div>
           </div>
 
-          {/* Habit Consistency */}
+          {/* === Habit Consistency === */}
           <div className="bg-white shadow-md rounded-lg p-6">
-                <h2 className="text-xl font-semibold mb-4 text-gray-800">Habit Consistency</h2>
-                {reportData.habitConsistency.length > 0 ? (
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">Habit</th>
-                                    {daysOfWeek.map(day => <th key={day} scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">{day}</th>)}
-                                    <th scope="col" className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Weekly Rate</th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                                {reportData.habitConsistency.map((habit) => (
-                                    <tr key={habit.id}>
-                                        <td className="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{habit.name} <span className="text-xs text-gray-400">({habit.timing})</span></td>
-                                        {habit.daily.map((status, index) => <td key={index} className="px-3 py-4 text-center text-sm"><StatusIcon completed={status} /></td>)}
-                                        <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500 text-right font-medium">{habit.rate}% ({habit.completed}/{habit.total})</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                 ) : ( <p className="text-gray-500 text-center py-4 italic">No habits tracked this week.</p> )}
+              <h2 className="text-xl font-semibold mb-4 text-gray-800">Habit Consistency</h2>
+              {reportData.habitConsistency.length > 0 ? (
+                  <div className="overflow-x-auto">
+                      {/* --- Use border-collapse --- */}
+                      <table className="min-w-full divide-y divide-gray-200 border-collapse table-fixed">
+                          <colgroup>
+                              {/* Define column widths */}
+                              <col style={{ width: '25%' }} /> {/* Habit column */}
+                              <col style={{ width: '8%' }} />  {/* Sun */}
+                              <col style={{ width: '8%' }} />  {/* Mon */}
+                              <col style={{ width: '8%' }} />  {/* Tue */}
+                              <col style={{ width: '8%' }} />  {/* Wed */}
+                              <col style={{ width: '8%' }} />  {/* Thu */}
+                              <col style={{ width: '8%' }} />  {/* Fri */}
+                              <col style={{ width: '8%' }} />  {/* Sat */}
+                              <col style={{ width: '19%' }} /> {/* Weekly Rate column */}
+                          </colgroup>
+                          <thead className="bg-gray-50">
+                              <tr>
+                                  {/* No width needed here, defined in colgroup */}
+                                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Habit</th>
+                                  {daysOfWeek.map(day => <th key={day} scope="col" className="px-0 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">{day}</th>)}
+                                  <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Weekly Rate</th>
+                              </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                              {reportData.habitConsistency.map((habit) => (
+                                  <tr key={habit.id}>
+                                      <td className="px-2 py-2 whitespace-nowrap text-sm font-medium text-gray-900 border border-gray-200">{habit.name} <span className="text-xs text-gray-400">({habit.timing})</span></td>
+                                      {habit.daily.map((status, index) => (
+                                          <td
+                                              key={index}
+                                              className={`
+                                                  h-6 align-middle overflow-hidden border border-white // Add white border, remove padding
+                                                  ${ // Color Logic
+                                                      status === true ? 'bg-green-200'
+                                                      : status === false ? 'bg-red-200'
+                                                      : 'bg-gray-100'
+                                                  }
+                                              `}
+                                              title={status === true ? 'Completed' : status === false ? 'Missed' : 'N/A'}
+                                          >
+                                              <div className="h-full w-full"></div>
+                                          </td>
+                                      ))}
+                                      <td className="px-2 py-2 whitespace-nowrap text-sm text-gray-500 text-right font-medium border border-gray-200">{habit.rate}% ({habit.completed}/{habit.total})</td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
+               ) : ( <p className="text-gray-500 text-center py-4 italic">No habits tracked this week.</p> )}
           </div>
 
-          {/* Ratings Trend */}
+          {/* === Ratings Trend === (No changes needed here) */}
            <div className="bg-white shadow-md rounded-lg p-6">
                <h2 className="text-xl font-semibold mb-4 text-gray-800">Ratings Trend</h2>
                <div style={{ width: '100%', height: 300 }}>
@@ -369,7 +518,7 @@ export default function WeeklyReportPage() {
                </div>
            </div>
 
-          {/* Qualitative Review - Styled Tags */}
+          {/* === Qualitative Review === (No changes needed here) */}
           <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg shadow-sm">
               <h2 className="text-xl font-semibold mb-4 text-gray-800 text-center">Qualitative Review</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

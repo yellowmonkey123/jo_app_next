@@ -258,3 +258,33 @@ Test the handoff process by starting
 * (Deferred) Implement user settings for customizing reminder times/days.
 * (Deferred) Review SMS message content for any desired changes (e.g., adding the app URL if needed).
 ---
+---
+## Session Summary [2025-04-29]
+
+**Goal:** Enhance the Weekly Report page UI/UX, focusing on the week selector and habit completion visualization.
+
+**Key Changes:**
+* **Week Selector Order:** Fixed the week selector button order to display chronologically (1, 2, 3...). Adjusted logic to handle Week 1 starting in the previous calendar year correctly. (`src/app/weekly-report/page.tsx` - Effect 3)
+* **Week Selector Status:** Corrected the status calculation logic (`UNAVAILABLE`, `PAST_COMPLETED`, etc.) to accurately reflect the user's `firstLogDate` and handle the week containing Jan 1st. (`src/app/weekly-report/page.tsx` - Effect 3)
+* **Habit Completion UI:**
+    * Replaced check/cross icons with solid colored blocks (`bg-green-200`, `bg-red-200`, `bg-gray-100`) filling the table cells for daily completion status in "Completion Summary" and "Habit Consistency" tables. (`src/app/weekly-report/page.tsx` - JSX Tables)
+    * Adjusted table cell padding (`py-2`) and added fixed height (`h-6`) to status cells for a more compact look.
+    * Implemented `table-fixed` layout with `<colgroup>` to ensure uniform width for daily status columns.
+    * Experimented with different color shades and border styles (`border-separate` vs `border-collapse`) to refine visual appearance and spacing. Final iteration uses `border-collapse` with explicit bottom borders on text cells and white borders on status cells.
+* **Date Formatting:** Fixed `RangeError` related to date formatting by changing `'MMMM do'` and `'YYYY'` to `'MMMM d'` and `'yyyy'` respectively in `format` calls. (`src/app/weekly-report/page.tsx`)
+* **Sticky Navigation (Deferred):** Added logic and initial JSX for sticky previous/next week navigation arrows using Heroicons, but implementation was paused due to table styling conflicts. (`src/app/weekly-report/page.tsx`)
+
+**Current Application Status:**
+* Weekly Report page displays weeks correctly ordered and with accurate status coloring based on the user's history.
+* Habit/Routine completion is visualized using a grid of uniformly sized, colored blocks with subtle white borders separating them and standard row dividers.
+* Build is stable (excluding the incomplete sticky navigation feature).
+
+**Dependencies Added/Changed:** Added `@heroicons/react` (`v2.1.3` or similar, check `package.json`) for the (deferred) sticky navigation arrows feature.
+
+**Next Steps / Open Issues:**
+* Finalize and test sticky navigation arrows for previous/next week navigation (paused).
+* Review and potentially further refine the table styling/borders for the completion grids if desired.
+* (Deferred from previous) Implement user setting for weekly report availability time (Sunday/Monday).
+* (Deferred from previous) Implement weekly cover photo upload/display feature.
+* (Deferred from previous) Add year navigation to the weekly report selector.
+---
